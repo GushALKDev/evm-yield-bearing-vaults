@@ -1,0 +1,37 @@
+# Compiler files
+cache/
+out/
+build/
+artifacts/
+
+# Ignores development broadcast logs
+!/broadcast
+/broadcast/*/31337/
+/broadcast/**/dry-run/
+
+# Docs
+docs/
+.agent/
+README.md
+
+# Dotenv file
+.env
+.env.local
+.env.*
+
+# Editor configs
+.vscode/
+.idea/
+*.swp
+*.DS_Store
+.history/
+
+# Node modules
+node_modules/
+
+# Foundry
+.foundry/
+.qd/
+
+# Libraries (dependencies)
+lib/
