@@ -18,15 +18,25 @@ abstract contract BaseVault is ERC4626, Whitelist {
     //////////////////////////////////////////////////////////////*/
 
     BaseStrategy public strategy;
+    
+    // Circuit Breaker Status
+    bool public emergencyMode;
 
     /*//////////////////////////////////////////////////////////////
-                                EVENTS
+                                 EVENTS
     //////////////////////////////////////////////////////////////*/
 
     event StrategySet(address indexed strategy);
+    event EmergencyModeSet(bool isOpen);
 
     /*//////////////////////////////////////////////////////////////
-                              CONSTRUCTOR
+                                 ERRORS
+    //////////////////////////////////////////////////////////////*/
+    
+    error VaultInEmergency();
+
+    /*//////////////////////////////////////////////////////////////
+                               CONSTRUCTOR
     //////////////////////////////////////////////////////////////*/
 
     constructor(IERC20 _asset, string memory _name, string memory _symbol, address _owner, uint256 _initialDeposit)
@@ -43,16 +53,36 @@ abstract contract BaseVault is ERC4626, Whitelist {
     }
 
     /*//////////////////////////////////////////////////////////////
+                                MODIFIERS
+    //////////////////////////////////////////////////////////////*/
+
+    modifier whenNotEmergency() {
+        if (emergencyMode) revert VaultInEmergency();
+        _;
+    }
+
+    /*//////////////////////////////////////////////////////////////
                            ADMIN FUNCTIONS
     //////////////////////////////////////////////////////////////*/
 
     /// @notice Set the strategy for this vault.
-    /// @dev Can be called to update strategy. Beware of funds in old strategy!
-    /// This simple implementation assumes migration is handled manually or strategy is empty.
+    /// @dev Beware of funds in old strategy!
     function setStrategy(BaseStrategy _strategy) external onlyOwner {
         strategy = _strategy;
         IERC20(asset()).approve(address(_strategy), type(uint256).max);
         emit StrategySet(address(_strategy));
+    }
+    
+    /// @notice Activates or Deactivates Emergency Mode (Circuit Breaker).
+    /// @dev Stops deposits on both Vault and Strategy. Withdrawals remain active.
+    /// @param _isOpen True to pause, False to unpause.
+    function setEmergencyMode(bool _isOpen) external onlyOwner {
+        emergencyMode = _isOpen;
+        // Propagate panic to strategy if it exists
+        if (address(strategy) != address(0)) {
+            strategy.setEmergencyMode(_isOpen);
+        }
+        emit EmergencyModeSet(_isOpen);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -72,7 +102,7 @@ abstract contract BaseVault is ERC4626, Whitelist {
     }
 
     /// @dev Hook called after deposit. Pushes funds to strategy.
-    function _deposit(address caller, address receiver, uint256 assets, uint256 shares) internal virtual override {
+    function _deposit(address caller, address receiver, uint256 assets, uint256 shares) internal virtual override whenNotEmergency {
         // Enforce Whitelist for new depositors
         if (!isWhitelisted[receiver]) revert NotWhitelisted(receiver);
         

@@ -35,4 +35,12 @@ contract MockStrategy is BaseStrategy {
     function _divest(uint256 /* assets */) internal override {
         // No-op: Funds are already in this contract available for transfer.
     }
+
+    /// @dev No-op for mock.
+    function harvest() external override {}
+
+    /// @dev Always healthy for mock.
+    function checkHealth() external pure override returns (bool) {
+        return true;
+    }
 }

@@ -13,16 +13,26 @@ abstract contract BaseStrategy is ERC4626 {
     using SafeERC20 for IERC20;
 
     /*//////////////////////////////////////////////////////////////
-                                 ERRORS
-    //////////////////////////////////////////////////////////////*/
-
-    error OnlyVault();
-
-    /*//////////////////////////////////////////////////////////////
                                 STORAGE
     //////////////////////////////////////////////////////////////*/
 
     address public immutable vault;
+    
+    // Circuit Breaker Status
+    bool public emergencyMode;
+
+    /*//////////////////////////////////////////////////////////////
+                                 EVENTS
+    //////////////////////////////////////////////////////////////*/
+
+    event EmergencyModeSet(bool isOpen);
+
+    /*//////////////////////////////////////////////////////////////
+                                 ERRORS
+    //////////////////////////////////////////////////////////////*/
+
+    error OnlyVault();
+    error StrategyInEmergency();
 
     /*//////////////////////////////////////////////////////////////
                               CONSTRUCTOR
@@ -36,7 +46,7 @@ abstract contract BaseStrategy is ERC4626 {
     }
 
     /*//////////////////////////////////////////////////////////////
-                               MODIFIERS
+                                MODIFIERS
     //////////////////////////////////////////////////////////////*/
 
     modifier onlyVault() {
@@ -44,26 +54,34 @@ abstract contract BaseStrategy is ERC4626 {
         _;
     }
 
+    modifier whenNotEmergency() {
+        if (emergencyMode) revert StrategyInEmergency();
+        _;
+    }
+
     /*//////////////////////////////////////////////////////////////
-                           RESTRICTED ACTIONS
+                            RESTRICTED ACTIONS
     //////////////////////////////////////////////////////////////*/
 
     /**
-     * @dev Restrict deposit to the Vault.
+     * @dev Restrict deposit to the Vault. 
+     *      Blocked when in Emergency Mode.
      */
-    function deposit(uint256 assets, address receiver) public virtual override onlyVault returns (uint256) {
+    function deposit(uint256 assets, address receiver) public virtual override onlyVault whenNotEmergency returns (uint256) {
         return super.deposit(assets, receiver);
     }
 
     /**
      * @dev Restrict mint to the Vault.
+     *      Blocked when in Emergency Mode.
      */
-    function mint(uint256 shares, address receiver) public virtual override onlyVault returns (uint256) {
+    function mint(uint256 shares, address receiver) public virtual override onlyVault whenNotEmergency returns (uint256) {
         return super.mint(shares, receiver);
     }
 
     /**
      * @dev Restrict withdraw to the Vault.
+     *      Always allowed, even in Emergency Mode (Exit hatch).
      */
     function withdraw(uint256 assets, address receiver, address owner) public virtual override onlyVault returns (uint256) {
         return super.withdraw(assets, receiver, owner);
@@ -71,9 +89,19 @@ abstract contract BaseStrategy is ERC4626 {
 
     /**
      * @dev Restrict redeem to the Vault.
+     *      Always allowed (Exit hatch).
      */
     function redeem(uint256 shares, address receiver, address owner) public virtual override onlyVault returns (uint256) {
         return super.redeem(shares, receiver, owner);
+    }
+
+    /**
+     * @dev Sets the emergency mode status.
+     *      Can only be called by the Vault.
+     */
+    function setEmergencyMode(bool _isOpen) external onlyVault {
+        emergencyMode = _isOpen;
+        emit EmergencyModeSet(_isOpen);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -109,6 +137,12 @@ abstract contract BaseStrategy is ERC4626 {
 
     /// @dev Logic to divest assets from the underlying protocol.
     function _divest(uint256 assets) internal virtual;
+
+    /// @dev Logic to harvest rewards and re-invest.
+    function harvest() external virtual;
+
+    /// @dev Checks if the strategy is healthy (e.g. not paused, solvent).
+    function checkHealth() external view virtual returns (bool);
 }
 
 

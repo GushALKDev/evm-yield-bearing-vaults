@@ -11,6 +11,4 @@ contract BetaVault is BaseVault {
     constructor(IERC20 _asset, address _owner, uint256 _initialDeposit)
         BaseVault(_asset, "Beta Vault", "bVAULT", _owner, _initialDeposit)
     {}
-
-    // Future specific logic for BetaVault can go here
 }
