@@ -8,9 +8,11 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {Whitelist} from "../access/Whitelist.sol";
 import {BaseStrategy} from "./BaseStrategy.sol";
 
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+
 /// @title BaseVault
 /// @notice Abstract Vault that integrates with a Strategy and enforces Whitelisting.
-abstract contract BaseVault is ERC4626, Whitelist {
+abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     /*//////////////////////////////////////////////////////////////
@@ -88,6 +90,26 @@ abstract contract BaseVault is ERC4626, Whitelist {
     /*//////////////////////////////////////////////////////////////
                         ERC4626 OVERRIDES
     //////////////////////////////////////////////////////////////*/
+
+    /** @dev See {IERC4626-deposit}. */
+    function deposit(uint256 assets, address receiver) public virtual override nonReentrant returns (uint256) {
+        return super.deposit(assets, receiver);
+    }
+
+    /** @dev See {IERC4626-mint}. */
+    function mint(uint256 shares, address receiver) public virtual override nonReentrant returns (uint256) {
+        return super.mint(shares, receiver);
+    }
+
+    /** @dev See {IERC4626-withdraw}. */
+    function withdraw(uint256 assets, address receiver, address owner) public virtual override nonReentrant returns (uint256) {
+        return super.withdraw(assets, receiver, owner);
+    }
+
+    /** @dev See {IERC4626-redeem}. */
+    function redeem(uint256 shares, address receiver, address owner) public virtual override nonReentrant returns (uint256) {
+        return super.redeem(shares, receiver, owner);
+    }
 
     /// @notice Calculates total assets including those in the strategy.
     function totalAssets() public view virtual override returns (uint256) {
