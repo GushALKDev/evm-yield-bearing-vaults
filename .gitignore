@@ -12,7 +12,6 @@ artifacts/
 # Docs
 docs/
 .agent/
-README.md
 
 # Dotenv file
 .env
