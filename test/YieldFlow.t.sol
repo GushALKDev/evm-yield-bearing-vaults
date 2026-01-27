@@ -144,4 +144,58 @@ contract YieldFlowTest is Test {
         console.log("Total Assets:", vault.totalAssets());
         console.log("Total Supply:", vault.totalSupply());
     }
+    function test_PerformanceFeeLogic() public {
+        // 1. Setup Fees
+        address feeRecipient = makeAddr("feeRecipient");
+        vault.setFeeRecipient(feeRecipient);
+        vault.setProtocolFee(1000); // 10% on profit
+
+        // 2. Deposit
+        vm.startPrank(alice);
+        asset.approve(address(vault), DEPOSIT_AMOUNT);
+        vault.deposit(DEPOSIT_AMOUNT, alice);
+        vm.stopPrank();
+
+        // 3. Verify No Fee on Principal
+        // Fees are assessed on deposit, but HWM should match Total Assets initially (plus deposit logic)
+        // No profit generated yet.
+        assertEq(vault.balanceOf(feeRecipient), 0, "No fees should be paid on principal deposit");
+
+        // 4. Generate Yield (Profit)
+        uint256 profit = 20e18; // 20% gain
+        asset.transfer(address(strategy), profit);
+        
+        // 5. Trigger Fee Assessment (Manual)
+        vault.assessPerformanceFee();
+
+        // 6. Verify Fee Payment
+        // Fee = 10% of 20 = 2 assets worth of shares.
+        // Shares minted will be relative to current share price.
+        uint256 recipientShares = vault.balanceOf(feeRecipient);
+        assertGt(recipientShares, 0, "Fee recipient should have received shares");
+        
+        uint256 feeAssetsApprox = vault.convertToAssets(recipientShares);
+        assertApproxEqAbs(feeAssetsApprox, 2e18, 0.1e18, "Fee value should be approx 10% of profit");
+
+        // 7. Verify High Watermark Updated
+        // Second assessment should yield 0 fees unless new profit
+        uint256 sharesBeforeOnly = vault.balanceOf(feeRecipient);
+        vault.assessPerformanceFee();
+        assertEq(vault.balanceOf(feeRecipient), sharesBeforeOnly, "No double counting of fees");
+
+        // 8. Withdraw Trigger
+        // Generate more yield
+        uint256 moreProfit = 10e18;
+        asset.transfer(address(strategy), moreProfit);
+        
+        vm.startPrank(alice);
+        // Withdraw should convert shares. 
+        // Note: Alice's shares are now diluted by the fee shares, so she gets slightly less of the "total pie" than 100%, 
+        // but she gets her principal + 90% of profit.
+        vault.redeem(DEPOSIT_AMOUNT, alice, alice); 
+        vm.stopPrank();
+
+        // Verify fees increased again during withdraw trigger
+        assertGt(vault.balanceOf(feeRecipient), sharesBeforeOnly, "Withdraw should have triggered 2nd fee payment");
+    }
 }
