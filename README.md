@@ -26,38 +26,30 @@ A modular ERC-4626 vault system with pluggable yield strategies, featuring lever
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│                         USER                                     │
-│                          │                                       │
-│                    deposit/withdraw                              │
-│                          ▼                                       │
-│  ┌─────────────────────────────────────────────────────────────┐ │
-│  │                   YieldBearingVault                         │ │
-│  │  • ERC-4626 compliant                                       │ │
-│  │  • Whitelist access control                                 │ │
-│  │  • Performance fees (HWM)                                   │ │
-│  │  • Emergency mode                                           │ │
-│  └──────────────────────────┬──────────────────────────────────┘ │
-│                             │                                    │
-│                       setStrategy()                              │
-│                             ▼                                    │
-│  ┌─────────────────────────────────────────────────────────────┐ │
-│  │                      Strategy                               │ │
-│  │                         │                                   │ │
-│  │     ┌───────────────────┴───────────────────┐               │ │
-│  │     ▼                                       ▼               │ │
-│  │ AaveSimpleLendingStrategy          WETHLoopStrategy         │ │
-│  │ • Supply to Aave V3                • Flash loan (Uniswap V4)│ │
-│  │ • Auto-compound via aTokens        • Leveraged supply (10x) │ │
-│  │ • No harvest needed                • E-Mode optimization    │ │
-│  └─────────────────────────────────────────────────────────────┘ │
-│                             │                                    │
-│                             ▼                                    │
-│  ┌─────────────────────────────────────────────────────────────┐ │
-│  │                   External Protocols                        │ │
-│  │            Aave V3 Pool  ←→  Uniswap V4 PoolManager         │ │
-│  └─────────────────────────────────────────────────────────────┘ │
-└──────────────────────────────────────────────────────────────────┘
+┌──────────────────────────┐
+│           USER           │
+└────────────┬─────────────┘
+             │    ▲
+  Collateral │    │ vShares
+             ▼    │
+┌──────────────────────────┐
+│    YieldBearingVault     │
+│  (ERC4626, Whitelist)    │
+└────────────┬─────────────┘
+             │    ▲
+  Collateral │    │ sShares
+             ▼    │
+┌──────────────────────────┐
+│         Strategy         │
+│ (AaveSimple / WETHLoop)  │
+└────────────┬─────────────┘
+             │    ▲
+  Collateral │    │ pTokens
+             ▼    │
+┌──────────────────────────┐
+│    External Protocols    │
+│   (Aave V3 / Uniswap)    │
+└──────────────────────────┘
 ```
 
 ## Contracts
