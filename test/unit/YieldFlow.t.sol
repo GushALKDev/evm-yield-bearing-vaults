@@ -2,8 +2,8 @@
 pragma solidity 0.8.26;
 
 import {Test, console} from "forge-std/Test.sol";
-import {YieldBearingVault} from "../src/vaults/YieldBearingVault.sol";
-import {MockStrategy} from "./mocks/MockStrategy.sol";
+import {YieldBearingVault} from "../../src/vaults/YieldBearingVault.sol";
+import {MockStrategy} from "../mocks/MockStrategy.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 /**

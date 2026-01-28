@@ -152,6 +152,48 @@ forge test --gas-report
 - **Aave V3** Protocol
 - **Uniswap V4** Core
 
+## Testing
+
+Comprehensive test suite with **135 tests** achieving **93.72% code coverage**.
+
+### Test Statistics
+- **Total Tests**: 135 (100% pass rate)
+- **Unit Tests**: 100
+- **Integration Tests**: 35
+
+### Coverage Metrics
+```
+Lines:       93.72%  (209/223)   ✅ Target: ≥90%
+Statements:  89.70%  (209/233)   ✅ Target: ≥85%
+Branches:    67.39%  (31/46)     ✅ Target: ≥60%
+Functions:   94.74%  (54/57)     ✅ Target: ≥90%
+```
+
+### Perfect Coverage (100%)
+- `BaseVault.sol` - All admin functions, emergency mode, HWM, fees
+- `AaveSimpleLendingStrategy.sol` - Investment logic, health checks
+- `UniswapV4Adapter.sol` - Flash loan mechanics
+
+### Test Commands
+```bash
+# Run all tests
+forge test
+
+# Unit tests only
+forge test --match-path "test/unit/*.sol"
+
+# Integration tests only
+forge test --match-path "test/integration/*.sol"
+
+# Coverage report
+forge coverage --no-match-coverage "(test|script|mock)"
+
+# Gas report
+forge test --gas-report
+```
+
+See [test/README.md](test/README.md) for detailed test documentation.
+
 ## Roadmap
 
 - [x] ERC-4626 Vault implementation
@@ -160,6 +202,7 @@ forge test --gas-report
 - [x] Proportional deleveraging mechanism
 - [x] Performance fees with HWM
 - [x] Emergency mode circuit breaker
+- [x] Comprehensive test suite (135 tests, 93.72% coverage)
 - [ ] Multi-asset loop strategies
 - [ ] Automatic health factor management
 - [ ] Gas optimizations

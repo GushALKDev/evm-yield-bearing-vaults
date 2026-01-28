@@ -3,11 +3,11 @@ pragma solidity 0.8.26;
 
 import {Test} from "forge-std/Test.sol";
 import {console} from "forge-std/console.sol";
-import {WETHLoopStrategy} from "../src/strategies/WETHLoopStrategy.sol";
+import {WETHLoopStrategy} from "../../src/strategies/WETHLoopStrategy.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {IPool} from "../src/interfaces/aave/IPool.sol";
-import {Constants} from "../src/utils/Constants.sol";
-import {YieldBearingVault} from "../src/vaults/YieldBearingVault.sol";
+import {IPool} from "../../src/interfaces/aave/IPool.sol";
+import {Constants} from "../../src/utils/Constants.sol";
+import {YieldBearingVault} from "../../src/vaults/YieldBearingVault.sol";
 
 /**
  * @title WETHLoopStrategyTest

@@ -3,9 +3,9 @@ pragma solidity 0.8.26;
 
 import {Test, console} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {YieldBearingVault} from "../src/vaults/YieldBearingVault.sol";
-import {AaveSimpleLendingStrategy} from "../src/strategies/AaveSimpleLendingStrategy.sol";
-import {Constants} from "../src/utils/Constants.sol";
+import {YieldBearingVault} from "../../src/vaults/YieldBearingVault.sol";
+import {AaveSimpleLendingStrategy} from "../../src/strategies/AaveSimpleLendingStrategy.sol";
+import {Constants} from "../../src/utils/Constants.sol";
 
 /**
  * @title AaveSimpleStrategyForkTest
