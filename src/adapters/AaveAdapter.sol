@@ -39,4 +39,15 @@ library AaveAdapter {
         IPool(pool).borrow(asset, amount, 2, 0, address(this));
         return amount;
     }
+
+    /**
+     * @dev Repays variable debt. Uses type(uint256).max to repay all debt.
+     * @return repaidAmount The actual amount repaid.
+     */
+    function repay(address pool, address asset, uint256 amount) internal returns (uint256 repaidAmount) {
+        if (amount == 0) return 0;
+
+        IERC20(asset).forceApprove(pool, amount);
+        return IPool(pool).repay(asset, amount, 2, address(this));
+    }
 }

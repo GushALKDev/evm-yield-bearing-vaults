@@ -67,13 +67,33 @@ A modular ERC-4626 vault system with pluggable yield strategies, featuring lever
 
 ## WETHLoopStrategy Flow
 
+### Investment (Leverage Loop)
+
 ```
-1. User deposits 1 WETH to Strategy
-2. Strategy requests 9 WETH flash loan from Uniswap V4
-3. Strategy supplies 10 WETH to Aave (E-Mode: 93% LTV)
-4. Strategy borrows 9 WETH from Aave
+1. User deposits X WETH to Strategy
+2. Strategy requests (X × (leverage - 1)) WETH flash loan from Uniswap V4
+3. Strategy supplies (X × leverage) WETH to Aave (E-Mode: 93% LTV)
+4. Strategy borrows flash loan amount from Aave
 5. Strategy repays flash loan with borrowed WETH
-6. Result: 10 WETH collateral, 9 WETH debt = 10x leverage
+6. Result: (X × leverage) collateral, (X × (leverage - 1)) debt
+
+Example with 10x leverage and 1 WETH deposit:
+- Collateral: 10 WETH | Debt: 9 WETH | Net Equity: 1 WETH
+```
+
+### Divestment (Deleverage Loop)
+
+```
+1. User withdraws Y WETH from Strategy
+2. Calculate withdrawal ratio: Y / netEquity
+3. Strategy requests (totalDebt × ratio) flash loan from Uniswap V4
+4. Strategy repays (totalDebt × ratio) debt to Aave
+5. Strategy withdraws (totalCollateral × ratio) from Aave
+6. Strategy repays flash loan with withdrawn collateral
+7. Result: Proportional reduction maintaining leverage ratio
+
+Example with 50% withdrawal from 10 WETH collateral / 9 WETH debt:
+- Withdraw: 5 WETH collateral | Repay: 4.5 WETH debt | Return: 0.5 WETH to user
 ```
 
 > **Why Uniswap V4?** I utilize Uniswap V4 for flash loans because it is currently **zero-fee**. Unlike other protocols (such as Aave V3 which charges 0.05%), this allows us to maximize the efficiency of leveraged positions without losing yield to flash loan premiums.
@@ -137,10 +157,11 @@ forge test --gas-report
 - [x] ERC-4626 Vault implementation
 - [x] Aave simple lending strategy
 - [x] Leveraged loop strategy (WETH)
+- [x] Proportional deleveraging mechanism
 - [x] Performance fees with HWM
 - [x] Emergency mode circuit breaker
 - [ ] Multi-asset loop strategies
-- [ ] Deleveraging mechanism
+- [ ] Automatic health factor management
 - [ ] Gas optimizations
 - [ ] Security audit
 - [ ] Mainnet deployment

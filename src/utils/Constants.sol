@@ -18,13 +18,13 @@ library Constants {
 
     // ==================== Aave V3 ====================
 
-    /**
-     * @dev Pool Address Provider: 0x2f39d218133AFaB8F2B819B1066c7E434Ad94E9e
-     */
+    address internal constant ETHEREUM_MAINNET_AAVE_V3_ADDRESS_PROVIDER = 0x2f39d218133AFaB8F2B819B1066c7E434Ad94E9e;
     address internal constant ETHEREUM_MAINNET_AAVE_V3_POOL = 0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2;
 
     address internal constant ETHEREUM_MAINNET_AAVE_V3_USDC_ATOKEN = 0x98C23E9d8f34FEFb1B7BD6a91B7FF122F4e16F5c;
     address internal constant ETHEREUM_MAINNET_AAVE_V3_WETH_ATOKEN = 0x4d5F47FA6A74757f35C14fD3a6Ef8E3C9BC514E8;
+
+    address internal constant ETHEREUM_MAINNET_AAVE_V3_WETH_VARIABLE_DEBT = 0xeA51d7853EEFb32b6ee06b1C12E6dcCA88Be0fFE;
 
     // ==================== Uniswap V4 ====================
 

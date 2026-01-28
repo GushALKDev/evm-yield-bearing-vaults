@@ -30,6 +30,14 @@ interface IPool {
     ) external;
 
     /**
+     * @param interestRateMode 1 for Stable, 2 for Variable.
+     * @return The final amount repaid.
+     */
+    function repay(address asset, uint256 amount, uint256 interestRateMode, address onBehalfOf)
+        external
+        returns (uint256);
+
+    /**
      * @return totalCollateralBase Total collateral in base currency (USD, 8 decimals).
      * @return totalDebtBase Total debt in base currency (USD, 8 decimals).
      * @return availableBorrowsBase Remaining borrowing power in base currency.

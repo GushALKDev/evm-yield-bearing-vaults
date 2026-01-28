@@ -32,6 +32,7 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
     uint8 public immutable eModeCategoryId;
     address public immutable aavePool;
     address public immutable aToken;
+    address public immutable variableDebtToken;
     uint256 public minHealthFactor;
     uint256 public targetHealthFactor;
 
@@ -48,6 +49,9 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
     error HealthFactorTooLow(uint256 current, uint256 min);
     error InvalidHealthFactors();
     error BorrowedAmountMismatch(uint256 borrowed, uint256 expected);
+    error InsufficientEquity();
+    error WithdrawExceedsEquity(uint256 requested, uint256 available);
+    error InsufficientBalanceForFlashRepayment(uint256 balance, uint256 required);
 
     /*//////////////////////////////////////////////////////////////
                                CONSTRUCTOR
@@ -60,6 +64,7 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
      * @param _poolManager The Uniswap V4 PoolManager for flash loans.
      * @param _aavePool The Aave V3 Pool contract.
      * @param _aToken The aWETH token address.
+     * @param _variableDebtToken The variable debt WETH token address.
      * @param _targetLeverage Target leverage multiplier (minimum 2x).
      * @param _minHealthFactor Minimum health factor threshold (1e18 scale).
      * @param _targetHealthFactor Target health factor to maintain (1e18 scale).
@@ -71,6 +76,7 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
         address _poolManager,
         address _aavePool,
         address _aToken,
+        address _variableDebtToken,
         uint8 _targetLeverage,
         uint256 _minHealthFactor,
         uint256 _targetHealthFactor,
@@ -78,6 +84,7 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
     ) BaseStrategy(_asset, _vault, "WETH Loop Strategy", "sWETH-Loop") UniswapV4Adapter(_poolManager) {
         aavePool = _aavePool;
         aToken = _aToken;
+        variableDebtToken = _variableDebtToken;
 
         if (_targetLeverage < 2) revert InvalidLeverage();
         targetLeverage = _targetLeverage;
@@ -130,26 +137,77 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
     }
 
     /**
-     * @dev Supplies principal + flash loan to Aave, then borrows to repay flash loan.
+     * @dev Deleverages position proportionally using flash loan.
      */
-    function _onFlashLoan(Currency currency, uint256 amount, bytes memory) internal override {
-        address underlying = Currency.unwrap(currency);
+    function _divest(uint256 assets) internal override {
+        // Checks
+        uint256 totalCollateral = IERC20(aToken).balanceOf(address(this));
+        uint256 totalDebt = IERC20(variableDebtToken).balanceOf(address(this));
 
-        // Supply Principal + Flash Loan to Aave
-        uint256 totalToSupply = IERC20(underlying).balanceOf(address(this));
-        AaveAdapter.supply(aavePool, underlying, totalToSupply);
+        if (totalCollateral == 0) return;
 
-        // Borrow to repay flash loan
-        uint256 borrowed = AaveAdapter.borrow(aavePool, underlying, amount);
+        if (totalDebt == 0) {
+            AaveAdapter.withdraw(aavePool, address(asset()), assets);
+            return;
+        }
 
-        if (borrowed != amount) revert BorrowedAmountMismatch(borrowed, amount);
+        uint256 netEquity = totalCollateral - totalDebt;
+        if (netEquity == 0) revert InsufficientEquity();
+
+        // Calculate proportional amounts to maintain leverage ratio
+        uint256 withdrawRatio = (assets * 1e18) / netEquity;
+        if (withdrawRatio > 1e18) revert WithdrawExceedsEquity(assets, netEquity);
+
+        // Effects
+        uint256 debtToRepay = (totalDebt * withdrawRatio) / 1e18;
+        uint256 collateralToWithdraw = (totalCollateral * withdrawRatio) / 1e18;
+
+        // Interactions
+        flashLoan(Currency.wrap(address(asset())), debtToRepay, abi.encode(true, collateralToWithdraw));
     }
 
     /**
-     * @dev Simplified implementation. Production requires full deleverage loop.
+     * @dev Routes flash loan callback to invest or divest flow.
      */
-    function _divest(uint256 assets) internal override {
-        AaveAdapter.withdraw(aavePool, address(asset()), assets);
+    function _onFlashLoan(Currency currency, uint256 amount, bytes memory data) internal override {
+        address underlying = Currency.unwrap(currency);
+
+        if (data.length == 0) {
+            _onFlashLoanInvest(underlying, amount);
+        } else {
+            (bool isDivest, uint256 collateralToWithdraw) = abi.decode(data, (bool, uint256));
+            if (isDivest) {
+                _onFlashLoanDivest(underlying, amount, collateralToWithdraw);
+            }
+        }
+    }
+
+    /**
+     * @dev Invests by supplying principal + flash loan to Aave, then borrows to repay flash.
+     */
+    function _onFlashLoanInvest(address underlying, uint256 flashAmount) internal {
+        // Checks
+        uint256 totalToSupply = IERC20(underlying).balanceOf(address(this));
+
+        // Interactions
+        AaveAdapter.supply(aavePool, underlying, totalToSupply);
+        uint256 borrowed = AaveAdapter.borrow(aavePool, underlying, flashAmount);
+
+        // Invariants
+        if (borrowed != flashAmount) revert BorrowedAmountMismatch(borrowed, flashAmount);
+    }
+
+    /**
+     * @dev Divests by repaying debt with flash loan, withdrawing collateral, then repaying flash.
+     */
+    function _onFlashLoanDivest(address underlying, uint256 flashAmount, uint256 collateralToWithdraw) internal {
+        // Interactions
+        AaveAdapter.repay(aavePool, underlying, flashAmount);
+        AaveAdapter.withdraw(aavePool, underlying, collateralToWithdraw);
+
+        // Invariants
+        uint256 balance = IERC20(underlying).balanceOf(address(this));
+        if (balance < flashAmount) revert InsufficientBalanceForFlashRepayment(balance, flashAmount);
     }
 
     /**
@@ -163,9 +221,14 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
     }
 
     /**
-     * @dev Returns aToken balance. For precise net equity, subtract debt.
+     * @dev Returns net equity (collateral - debt).
      */
     function totalAssets() public view override returns (uint256) {
-        return IERC20(aToken).balanceOf(address(this));
+        uint256 totalCollateral = IERC20(aToken).balanceOf(address(this));
+        uint256 totalDebt = IERC20(variableDebtToken).balanceOf(address(this));
+
+        if (totalCollateral <= totalDebt) return 0;
+
+        return totalCollateral - totalDebt;
     }
 }
