@@ -11,7 +11,6 @@ artifacts/
 
 # Docs
 docs/
-.agent/
 
 # Dotenv file
 .env
@@ -20,8 +19,10 @@ docs/
 
 # Editor configs
 .vscode/
+.agent/
 .idea/
 *.swp
+*.local.*
 *.DS_Store
 .history/
 

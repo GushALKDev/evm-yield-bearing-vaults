@@ -1,16 +1,18 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.33;
+pragma solidity 0.8.26;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
-/// @title Whitelist
-/// @notice Abstract contract for managing a whitelist of addresses.
-/// @dev Used by Vaults to restrict deposit/transfer permissions.
+/**
+ * @title Whitelist
+ * @author YieldBearingVaults Team
+ * @notice Abstract contract for managing a whitelist of addresses.
+ */
 abstract contract Whitelist is Ownable {
     /*//////////////////////////////////////////////////////////////
                                  ERRORS
     //////////////////////////////////////////////////////////////*/
-    
+
     error NotWhitelisted(address account);
 
     /*//////////////////////////////////////////////////////////////
@@ -33,10 +35,9 @@ abstract contract Whitelist is Ownable {
     constructor(address _initialOwner) Ownable(_initialOwner) {}
 
     /*//////////////////////////////////////////////////////////////
-                               LOGIC
+                               MODIFIERS
     //////////////////////////////////////////////////////////////*/
 
-    /// @notice Reverts if the account is not whitelisted.
     modifier onlyWhitelisted(address account) {
         if (!isWhitelisted[account]) {
             revert NotWhitelisted(account);
@@ -44,15 +45,15 @@ abstract contract Whitelist is Ownable {
         _;
     }
 
-    /// @notice Adds an account to the whitelist.
-    /// @param account The address to whitelist.
+    /*//////////////////////////////////////////////////////////////
+                           EXTERNAL FUNCTIONS
+    //////////////////////////////////////////////////////////////*/
+
     function addToWhitelist(address account) external onlyOwner {
         isWhitelisted[account] = true;
         emit WhitelistedAdded(account);
     }
 
-    /// @notice Removes an account from the whitelist.
-    /// @param account The address to remove.
     function removeFromWhitelist(address account) external onlyOwner {
         isWhitelisted[account] = false;
         emit WhitelistedRemoved(account);

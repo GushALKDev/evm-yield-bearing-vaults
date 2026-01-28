@@ -1,14 +1,20 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.33;
+pragma solidity 0.8.26;
 
 import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {BaseVault} from "./BaseVault.sol";
 
-/// @title BaseStrategy
-/// @notice Abstract base class for strategies compliant with ERC4626.
-/// @dev Implements access control for a specific Vault and defines hooks for investment logic.
+/**
+ * @title BaseStrategy
+ * @author YieldBearingVaults Team
+ * @notice Abstract base class for yield-generating strategies compliant with ERC4626.
+ * @dev Strategies are ERC4626 vaults that only accept deposits from their parent Vault.
+ *      They implement hooks for investing/divesting assets into external protocols.
+ *      Includes emergency mode circuit breaker for pausing deposits while allowing withdrawals.
+ */
 abstract contract BaseStrategy is ERC4626 {
     using SafeERC20 for IERC20;
 
@@ -17,8 +23,6 @@ abstract contract BaseStrategy is ERC4626 {
     //////////////////////////////////////////////////////////////*/
 
     address public immutable vault;
-    
-    // Circuit Breaker Status
     bool public emergencyMode;
 
     /*//////////////////////////////////////////////////////////////
@@ -32,15 +36,16 @@ abstract contract BaseStrategy is ERC4626 {
     //////////////////////////////////////////////////////////////*/
 
     error OnlyVault();
+    error NotVaultAdmin();
     error StrategyInEmergency();
 
     /*//////////////////////////////////////////////////////////////
                               CONSTRUCTOR
     //////////////////////////////////////////////////////////////*/
 
-    constructor(IERC20 _asset, address _vault, string memory _name, string memory _symbol) 
-        ERC4626(_asset) 
-        ERC20(_name, _symbol) 
+    constructor(IERC20 _asset, address _vault, string memory _name, string memory _symbol)
+        ERC4626(_asset)
+        ERC20(_name, _symbol)
     {
         vault = _vault;
     }
@@ -59,46 +64,47 @@ abstract contract BaseStrategy is ERC4626 {
         _;
     }
 
+    modifier onlyVaultAdmin() {
+        if (msg.sender != BaseVault(vault).admin()) revert NotVaultAdmin();
+        _;
+    }
+
     /*//////////////////////////////////////////////////////////////
-                            RESTRICTED ACTIONS
+                            ERC4626 OVERRIDES
     //////////////////////////////////////////////////////////////*/
 
     /**
-     * @dev Restrict deposit to the Vault. 
-     *      Blocked when in Emergency Mode.
+     * @dev Blocked during emergency mode.
      */
     function deposit(uint256 assets, address receiver) public virtual override onlyVault whenNotEmergency returns (uint256) {
         return super.deposit(assets, receiver);
     }
 
     /**
-     * @dev Restrict mint to the Vault.
-     *      Blocked when in Emergency Mode.
+     * @dev Blocked during emergency mode.
      */
     function mint(uint256 shares, address receiver) public virtual override onlyVault whenNotEmergency returns (uint256) {
         return super.mint(shares, receiver);
     }
 
     /**
-     * @dev Restrict withdraw to the Vault.
-     *      Always allowed, even in Emergency Mode (Exit hatch).
+     * @dev Allowed during emergency mode (exit hatch).
      */
     function withdraw(uint256 assets, address receiver, address owner) public virtual override onlyVault returns (uint256) {
         return super.withdraw(assets, receiver, owner);
     }
 
     /**
-     * @dev Restrict redeem to the Vault.
-     *      Always allowed (Exit hatch).
+     * @dev Allowed during emergency mode (exit hatch).
      */
     function redeem(uint256 shares, address receiver, address owner) public virtual override onlyVault returns (uint256) {
         return super.redeem(shares, receiver, owner);
     }
 
-    /**
-     * @dev Sets the emergency mode status.
-     *      Can only be called by the Vault.
-     */
+    /*//////////////////////////////////////////////////////////////
+                           ADMIN FUNCTIONS
+    //////////////////////////////////////////////////////////////*/
+
     function setEmergencyMode(bool _isOpen) external onlyVault {
         emergencyMode = _isOpen;
         emit EmergencyModeSet(_isOpen);
@@ -109,9 +115,7 @@ abstract contract BaseStrategy is ERC4626 {
     //////////////////////////////////////////////////////////////*/
 
     /**
-     * @dev Internal hook executed after assets are deposited.
-     *      Override this to invest the assets into the external protocol.
-     *      At this point, the assets are already in this contract.
+     * @dev Invests deposited assets into the external protocol.
      */
     function _deposit(address caller, address receiver, uint256 assets, uint256 shares) internal virtual override {
         super._deposit(caller, receiver, assets, shares);
@@ -119,9 +123,7 @@ abstract contract BaseStrategy is ERC4626 {
     }
 
     /**
-     * @dev Internal hook executed before assets are withdrawn.
-     *      Override this to divest assets from the external protocol.
-     *      Must ensure the contract holds 'assets' amount of tokens after this call.
+     * @dev Divests assets from the external protocol before withdrawal.
      */
     function _withdraw(address caller, address receiver, address owner, uint256 assets, uint256 shares) internal virtual override {
         _divest(assets);
@@ -132,17 +134,13 @@ abstract contract BaseStrategy is ERC4626 {
                           ABSTRACT FUNCTIONS
     //////////////////////////////////////////////////////////////*/
 
-    /// @dev Logic to invest assets into the underlying protocol.
     function _invest(uint256 assets) internal virtual;
 
-    /// @dev Logic to divest assets from the underlying protocol.
+    /**
+     * @dev Must ensure the contract holds `assets` amount after this call.
+     */
     function _divest(uint256 assets) internal virtual;
 
-    /// @dev Logic to harvest rewards and re-invest.
     function harvest() external virtual;
-
-    /// @dev Checks if the strategy is healthy (e.g. not paused, solvent).
     function checkHealth() external view virtual returns (bool);
 }
-
-

@@ -1,87 +1,162 @@
-# Yield Bearing Vaults (Beta)
+# Yield Bearing Vaults
 
-![Status](https://img.shields.io/badge/Status-Work_In_Progress-yellow)
+![Status](https://img.shields.io/badge/Status-Beta-yellow)
 ![License](https://img.shields.io/badge/License-MIT-green)
-![Solidity](https://img.shields.io/badge/Solidity-0.8.33-blue)
+![Solidity](https://img.shields.io/badge/Solidity-0.8.26-blue)
 ![Foundry](https://img.shields.io/badge/Built%20with-Foundry-orange)
 
-## ⚠️ Disclaimer: Under Construction
+A modular ERC-4626 vault system with pluggable yield strategies, featuring leveraged looping via **zero-fee Uniswap V4 flash loans** and Aave V3 E-Mode.
 
-**This protocol is currently in the early stages of development.** 
+## Status
 
-Please note the following before reviewing:
-- **Audit Status**: Unaudited. 
-- **Tests**: Core functionality is tested, but comprehensive coverage (including complex edge cases and invariant tests) is still in progress.
-- **Gas Optimization**: The current focus is on logic and security correctness. Gas optimizations (assembly/Yul) will be addressed in future iterations.
-- **Strategies**: Currently supports simple lending strategies (Aave). More complex strategies are planned.
-
-**DO NOT USE IN PRODUCTION.**
-
----
-
-## Overview
-
-**Yield Bearing Vaults** is a modular ERC-4626 implementation designed to separate yield generation logic (Strategies) from the vault's core accounting (Vaults).
-
-The system allows liquidity providers to deposit assets into a Vault, which then delegates those funds to a specific `Strategy` to earn yield across various DeFi protocols (e.g., Aave).
+> **Work In Progress (Beta)** - Core functionality tested. Unaudited. **DO NOT USE IN PRODUCTION.**
 
 ## Key Features
 
-- **ERC-4626 Compliance**: Standardized Tokenized Vault structure for composability.
-- **Modular Strategy Architecture**: Vaults can switch strategies seamlessly.
-- **Access Control (Whitelist)**: Strictly controlled access for depositors and transfers.
-- **Circuit Breaker (Emergency Mode)**: Admin ability to pause deposits and complex strategy logic in case of emergency, protecting user funds.
-- **Inflation Attack Protection**: Native mitigation against the "first depositor" inflation attack by managing the initial deposit state when total supply is zero.
-- **Performance Fees**: High Water Mark mechanism ensuring fees are only charged on net profits, preventing double taxation on principal.
+- **Modular Architecture** - Decoupled Vault/Strategy pattern enabling atomic pass-through deposits. Funds route instantly (User → Vault → Strategy → Protocol) in a single transaction.
+
+- **Leveraged Loop Strategy** - Atomic **Uniswap V4 Flash Loan** (zero fee) + **Aave V3 E-Mode** strategy to cycle liquidity, maximizing LTV (up to 93%) and capturing yield spread with up to 10x leverage. Uniswap V4 is preferred over other providers because it offers flash loans with no protocol fees.
+
+- **Defensive Security** - Critical protections including **Emergency Circuit Breakers** (pausing), **Reentrancy Guards**, and **Inflation Attack Prevention** (dead shares mechanism).
+
+- **Financial Integrity** - **High Water Mark** accounting ensures performance fees are only charged on net profits, preventing double taxation.
+
+- **ERC-4626 Compliance** - Fully tokenized vault shares for maximum DeFi composability.
 
 ## Architecture
 
-* **BetaVault**: The core vault contract handling user deposits, withdrawals, and share minting/burning.
-* **BaseStrategy**: Abstract base class ensuring all strategies adhere to a standard interface.
-* **AaveSimpleLendingStrategy**: A concrete strategy implementation that supplies assets to Aave V3 to earn lending yield.
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                         USER                                     │
+│                          │                                       │
+│                    deposit/withdraw                              │
+│                          ▼                                       │
+│  ┌─────────────────────────────────────────────────────────────┐ │
+│  │                   YieldBearingVault                         │ │
+│  │  • ERC-4626 compliant                                       │ │
+│  │  • Whitelist access control                                 │ │
+│  │  • Performance fees (HWM)                                   │ │
+│  │  • Emergency mode                                           │ │
+│  └──────────────────────────┬──────────────────────────────────┘ │
+│                             │                                    │
+│                       setStrategy()                              │
+│                             ▼                                    │
+│  ┌─────────────────────────────────────────────────────────────┐ │
+│  │                      Strategy                               │ │
+│  │                         │                                   │ │
+│  │     ┌───────────────────┴───────────────────┐               │ │
+│  │     ▼                                       ▼               │ │
+│  │ AaveSimpleLendingStrategy          WETHLoopStrategy         │ │
+│  │ • Supply to Aave V3                • Flash loan (Uniswap V4)│ │
+│  │ • Auto-compound via aTokens        • Leveraged supply (10x) │ │
+│  │ • No harvest needed                • E-Mode optimization    │ │
+│  └─────────────────────────────────────────────────────────────┘ │
+│                             │                                    │
+│                             ▼                                    │
+│  ┌─────────────────────────────────────────────────────────────┐ │
+│  │                   External Protocols                        │ │
+│  │            Aave V3 Pool  ←→  Uniswap V4 PoolManager         │ │
+│  └─────────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────────┘
+```
 
-## Roadmap
+## Contracts
 
-- [ ] **Testing**: Achieve 100% branch coverage and add Fuzz/Invariant tests.
-- [ ] **Gas**: Optimize heavy operations using assembly/Yul.
-- [ ] **Security**: Complete internal audit and bug bounty setup.
-- [ ] **Strategies**: Implement Leveraged Yield Farming and other complex yield sources.
-- [ ] **Governance**: Decentralize parameters control.
+| Contract | Description |
+|----------|-------------|
+| `YieldBearingVault` | ERC-4626 vault with whitelist, fees, and strategy integration |
+| `BaseVault` | Abstract base with core vault logic and HWM fees |
+| `BaseStrategy` | Abstract base for all yield strategies |
+| `AaveSimpleLendingStrategy` | Simple Aave V3 supply strategy (no leverage) |
+| `WETHLoopStrategy` | Leveraged WETH strategy using flash loans + E-Mode |
+| `AaveAdapter` | Library for Aave V3 interactions |
+| `UniswapV4Adapter` | Abstract adapter for Uniswap V4 flash loans |
+| `Whitelist` | Access control for deposits and transfers |
 
-## Installation & Usage
+## WETHLoopStrategy Flow
+
+```
+1. User deposits 1 WETH to Strategy
+2. Strategy requests 9 WETH flash loan from Uniswap V4
+3. Strategy supplies 10 WETH to Aave (E-Mode: 93% LTV)
+4. Strategy borrows 9 WETH from Aave
+5. Strategy repays flash loan with borrowed WETH
+6. Result: 10 WETH collateral, 9 WETH debt = 10x leverage
+```
+
+> **Why Uniswap V4?** I utilize Uniswap V4 for flash loans because it is currently **zero-fee**. Unlike other protocols (such as Aave V3 which charges 0.05%), this allows us to maximize the efficiency of leveraged positions without losing yield to flash loan premiums.
+
+
+## Installation
 
 This project uses [Foundry](https://book.getfoundry.sh/).
 
-### Configuration
+```bash
+# Clone the repository
+git clone https://github.com/GushALKDev/yield-bearing-vaults.git
+cd yield-bearing-vaults
 
-To run the full suite of tests (including Mainnet Fork tests), you must configure your RPC URL:
+# Install dependencies
+forge install
 
-1. Copy the example environment file:
-    ```shell
-    cp .env_example .env
-    ```
-2. Open `.env` and add your Ethereum Mainnet RPC URL to the variable `MAINNET_RPC_URL`.
+# Copy environment file
+cp .env_example .env
 
-    *Note: Without a valid RPC URL, fork tests will fail.*
-
-### Build
-
-```shell
-$ forge build
+# Add your Ethereum Mainnet RPC URL to .env
+# ETHEREUM_MAINNET_RPC=https://...
 ```
 
-### Test
+## Usage
 
-```shell
-$ forge test
+```bash
+# Build
+forge build
+
+# Test (requires ETHEREUM_MAINNET_RPC for fork tests)
+forge test
+
+# Test with verbosity
+forge test -vvv
+
+# Gas report
+forge test --gas-report
 ```
 
-### Deploy
+## Security Considerations
 
-```shell
-$ forge script script/Deploy.s.sol:DeployScript --rpc-url <your_rpc_url> --private-key <your_private_key>
-```
+| Protection | Implementation |
+|------------|----------------|
+| Inflation Attack | Initial 1000 wei deposit burned to dead address |
+| Reentrancy | OpenZeppelin ReentrancyGuard on all entry points |
+| Emergency Mode | Circuit breaker pauses deposits, allows withdrawals |
+| Access Control | Whitelist for deposits, Admin for configuration |
+| Fee Exploitation | High Water Mark prevents fee gaming |
+
+## Tech Stack
+
+- **Solidity** 0.8.26
+- **Foundry** (Forge, Cast, Anvil)
+- **OpenZeppelin** Contracts v5
+- **Aave V3** Protocol
+- **Uniswap V4** Core
+
+## Roadmap
+
+- [x] ERC-4626 Vault implementation
+- [x] Aave simple lending strategy
+- [x] Leveraged loop strategy (WETH)
+- [x] Performance fees with HWM
+- [x] Emergency mode circuit breaker
+- [ ] Multi-asset loop strategies
+- [ ] Deleveraging mechanism
+- [ ] Gas optimizations
+- [ ] Security audit
+- [ ] Mainnet deployment
+
+## License
+
+MIT
 
 ---
 
-Arquitected by **GushALKDev** with ❤️
+Built by **GushALKDev**

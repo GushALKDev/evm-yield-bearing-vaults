@@ -1,251 +1,311 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.33;
+pragma solidity 0.8.26;
 
 import {Test, console} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {BetaVault} from "../src/vaults/BetaVault.sol";
+import {YieldBearingVault} from "../src/vaults/YieldBearingVault.sol";
 import {AaveSimpleLendingStrategy} from "../src/strategies/AaveSimpleLendingStrategy.sol";
-
 import {Constants} from "../src/utils/Constants.sol";
 
+/**
+ * @title AaveSimpleStrategyForkTest
+ * @notice Fork tests for the Aave V3 simple lending strategy.
+ * @dev Tests deposit, withdraw, and redeem flows with real Aave integration.
+ *      Requires ETHEREUM_MAINNET_RPC environment variable to be set.
+ *
+ *      Strategy Flow:
+ *      1. User deposits USDC to vault
+ *      2. Vault forwards to strategy
+ *      3. Strategy supplies to Aave, receives aUSDC
+ *      4. Interest accrues via aToken rebasing
+ *      5. User withdraws principal + yield
+ */
 contract AaveSimpleStrategyForkTest is Test {
-    
-    // Mainnet Addresses via Constants
+    /*//////////////////////////////////////////////////////////////
+                             CONSTANTS
+    //////////////////////////////////////////////////////////////*/
+
+    /** @notice USDC token address on Ethereum Mainnet (6 decimals). */
     address constant USDC = Constants.ETHEREUM_MAINNET_USDC;
+
+    /** @notice Aave V3 Pool address on Ethereum Mainnet. */
     address constant AAVE_POOL = Constants.ETHEREUM_MAINNET_AAVE_V3_POOL;
+
+    /** @notice aUSDC token address (Aave interest-bearing USDC). */
     address constant A_USDC = Constants.ETHEREUM_MAINNET_AAVE_V3_USDC_ATOKEN;
 
-    BetaVault vault;
+    /** @notice Required initial deposit for vault (inflation protection). */
+    uint256 constant REQUIRED_DEPOSIT = 1000;
+
+    /** @notice Initial USDC balance for Alice (100,000 USDC). */
+    uint256 constant ALICE_INITIAL_BALANCE = 100_000e6;
+
+    /** @notice Initial USDC balance for Owner (10,000 USDC). */
+    uint256 constant OWNER_INITIAL_BALANCE = 10_000e6;
+
+    /** @notice Standard deposit amount for tests (5,000 USDC). */
+    uint256 constant DEPOSIT_AMOUNT = 5000e6;
+
+    /** @notice Dead address that holds burned shares. */
+    address constant DEAD_ADDRESS = 0x000000000000000000000000000000000000dEaD;
+
+    /*//////////////////////////////////////////////////////////////
+                               STATE
+    //////////////////////////////////////////////////////////////*/
+
+    YieldBearingVault vault;
     AaveSimpleLendingStrategy strategy;
     IERC20 usdc;
     IERC20 aUsdc;
 
-    address alice = makeAddr("alice");
-    address owner = makeAddr("owner");
+    address alice;
+    address owner;
 
-    uint256 INITIAL_DEPOSIT = 1000e6; // 1000 USDC
-    
+    /*//////////////////////////////////////////////////////////////
+                               SETUP
+    //////////////////////////////////////////////////////////////*/
+
     function setUp() public {
-        // Fork Mainnet;
+        // ============ CREATE TEST ADDRESSES ============
+        alice = makeAddr("alice");
+        owner = makeAddr("owner");
+
+        // ============ FORK MAINNET ============
         vm.createSelectFork(vm.envString("ETHEREUM_MAINNET_RPC"));
 
         usdc = IERC20(USDC);
         aUsdc = IERC20(A_USDC);
 
-        // Fund Alice and Owner (for initial deposit)
-        deal(USDC, alice, 100_000e6);
-        deal(USDC, owner, 10_000e6);
+        // ============ FUND TEST ACCOUNTS ============
+        deal(USDC, alice, ALICE_INITIAL_BALANCE);
+        deal(USDC, owner, OWNER_INITIAL_BALANCE);
 
-        // Deploy Vault
+        // ============ DEPLOY VAULT ============
         vm.startPrank(owner);
-        // Initial deposit to prevent inflation attack
-        uint256 initialDeposit = 1000;
-        address vaultAddr = vm.computeCreateAddress(owner, vm.getNonce(owner));
-        usdc.approve(vaultAddr, initialDeposit);
-        vault = new BetaVault(usdc, owner, initialDeposit);
-        
-        // Deploy Strategy
-        strategy = new AaveSimpleLendingStrategy(
-            usdc,
-            address(vault),
-            AAVE_POOL,
-            A_USDC
-        );
 
-        // Connect Strategy
+        // Pre-compute vault address to approve initial deposit
+        address vaultAddr = vm.computeCreateAddress(owner, vm.getNonce(owner));
+        usdc.approve(vaultAddr, REQUIRED_DEPOSIT);
+        vault = new YieldBearingVault(usdc, owner, owner, REQUIRED_DEPOSIT);
+
+        // ============ DEPLOY STRATEGY ============
+        strategy = new AaveSimpleLendingStrategy(usdc, address(vault), AAVE_POOL, A_USDC);
+
+        // ============ CONNECT STRATEGY & WHITELIST ============
         vault.setStrategy(strategy);
-        
-        // Whitelist Alice
         vault.addToWhitelist(alice);
+
         vm.stopPrank();
     }
 
-    function test_DepositInvestsInAave() public {
-        uint256 depositAmount = 5000e6;
+    /*//////////////////////////////////////////////////////////////
+                               TESTS
+    //////////////////////////////////////////////////////////////*/
 
+    /**
+     * @notice Tests that deposits are correctly invested into Aave.
+     * @dev Verifies:
+     *      - Vault total assets matches deposit + buffer
+     *      - Strategy holds 0 underlying (all in Aave)
+     *      - System invariants are maintained
+     */
+    function test_DepositInvestsInAave() public {
+        // ============ ACT: DEPOSIT ============
         vm.startPrank(alice);
-        usdc.approve(address(vault), depositAmount);
-        vault.deposit(depositAmount, alice);
+        usdc.approve(address(vault), DEPOSIT_AMOUNT);
+        vault.deposit(DEPOSIT_AMOUNT, alice);
         vm.stopPrank();
 
-        // Check Vault State
+        // ============ ASSERT: VAULT STATE ============
         uint256 vaultBalance = vault.totalAssets();
-        assertApproxEqAbs(vaultBalance, depositAmount + 1000, 2, "Vault total assets should approx match deposit + 1000 wei");
-        
-        // --- System Invariants Check ---
-        
-        // Underlying Assets (Physical Balance)
-        // Vault holds 1000 wei buffer, Strategy holds 0 (all in Aave)
-        assertEq(usdc.balanceOf(address(vault)), 1000, "Vault should hold 1000 wei buffer");
+        // Total = Deposit + Initial Buffer (1000 wei)
+        assertApproxEqAbs(vaultBalance, DEPOSIT_AMOUNT + REQUIRED_DEPOSIT, 2, "Vault total assets mismatch");
+
+        // ============ ASSERT: PHYSICAL BALANCES ============
+        // Vault holds only the initial buffer
+        assertEq(usdc.balanceOf(address(vault)), REQUIRED_DEPOSIT, "Vault should hold 1000 wei buffer");
+        // Strategy holds 0 underlying (all deposited to Aave)
         assertEq(usdc.balanceOf(address(strategy)), 0, "Strategy should hold 0 underlying");
 
-        // Shares Ownership
-        assertEq(vault.totalSupply(), vault.balanceOf(alice) + vault.balanceOf(address(0x000000000000000000000000000000000000dEaD)), "Vault Total Supply Invariant");
+        // ============ ASSERT: SHARE OWNERSHIP INVARIANTS ============
+        // Vault shares = Alice + Dead
+        assertEq(
+            vault.totalSupply(),
+            vault.balanceOf(alice) + vault.balanceOf(DEAD_ADDRESS),
+            "Vault Total Supply Invariant"
+        );
+        // Strategy shares = Vault's holdings
         assertEq(strategy.totalSupply(), strategy.balanceOf(address(vault)), "Strategy Total Supply Invariant");
 
-        // Managed Assets
-        // Vault has Strategy Assets + 1000 wei buffer
-        assertApproxEqAbs(vault.totalAssets(), strategy.totalAssets() + 1000, 2, "Vault vs Strategy Assets Invariant (+buffer)");
+        // ============ ASSERT: MANAGED ASSETS INVARIANT ============
+        // Vault assets = Strategy assets + Buffer
+        assertApproxEqAbs(
+            vault.totalAssets(), strategy.totalAssets() + REQUIRED_DEPOSIT, 2, "Vault vs Strategy Assets Invariant"
+        );
 
-        console.log("\n--- Final State Report (Deposit) ---");
-        
-        console.log("Underlying Asset Held (Alice):", usdc.balanceOf(alice));
-        console.log("Underlying Asset Held (Vault):", usdc.balanceOf(address(vault)));
-        console.log("Underlying Asset Held (Strategy):", usdc.balanceOf(address(strategy)));
-        
-        console.log("Vault Shares (Alice):", vault.balanceOf(alice));
-        console.log("Vault Shares (Dead):", vault.balanceOf(address(0x000000000000000000000000000000000000dEaD)));
-        console.log("Strategy Shares (Vault):", strategy.balanceOf(address(vault)));
-
-        console.log("aUSDC Balance (Strategy):", aUsdc.balanceOf(address(strategy)));
-
-        console.log("Vault Total Supply:", vault.totalSupply());
-        console.log("Strategy Total Supply:", strategy.totalSupply());
-
-        console.log("Vault Total Managed Assets:", vault.totalAssets());
-        console.log("Strategy Total Managed Assets:", strategy.totalAssets());
+        _logState("Deposit");
     }
 
+    /**
+     * @notice Tests that withdrawals correctly divest from Aave with yield.
+     * @dev Verifies:
+     *      - Yield accrues over time via aToken rebasing
+     *      - Withdrawals return correct amount
+     *      - Remaining position is healthy
+     */
     function test_WithdrawDivestsFromAave() public {
-        uint256 depositAmount = 5000e6;
-
-        // Deposit
+        // ============ ARRANGE: DEPOSIT ============
         vm.startPrank(alice);
-        usdc.approve(address(vault), depositAmount);
-        vault.deposit(depositAmount, alice);
-        
-        // Check Strategy Balance BEFORE time travel
+        usdc.approve(address(vault), DEPOSIT_AMOUNT);
+        vault.deposit(DEPOSIT_AMOUNT, alice);
+
         uint256 strategyAssetsBefore = strategy.totalAssets();
         console.log("Strategy Total Managed Assets Initial:", strategyAssetsBefore);
 
-        // Time travel to accrue interest
-        vm.roll(block.number + 7200); // ~1 day of blocks
-        vm.warp(block.timestamp + 1 days); 
+        // ============ ACT: TIME TRAVEL (1 DAY) ============
+        // Simulate 1 day passing for yield accrual
+        // ~7200 blocks at 12s/block = 1 day
+        vm.roll(block.number + 7200);
+        vm.warp(block.timestamp + 1 days);
 
-        // Check Strategy Balance AFTER time travel
+        // ============ ASSERT: YIELD GENERATED ============
         uint256 strategyAssetsAfter = strategy.totalAssets();
-        console.log("Strategy Total Managed Assets After 1 Day:", strategyAssetsAfter);
-        console.log("Yield Generated:", strategyAssetsAfter - strategyAssetsBefore);
+        uint256 yieldGenerated = strategyAssetsAfter - strategyAssetsBefore;
 
-        // Ensure we actually earned something
-        assertGt(strategyAssetsAfter, strategyAssetsBefore, "Should have earned yield");
-        
-        // Withdraw half
-        uint256 withdrawAmount = depositAmount / 2;
+        console.log("Strategy Total Managed Assets After 1 Day:", strategyAssetsAfter);
+        console.log("Yield Generated:", yieldGenerated);
+
+        assertGt(strategyAssetsAfter, strategyAssetsBefore, "Should have earned yield from Aave");
+
+        // ============ ACT: WITHDRAW HALF ============
+        uint256 withdrawAmount = DEPOSIT_AMOUNT / 2; // 2,500 USDC
         vault.withdraw(withdrawAmount, alice, alice);
         vm.stopPrank();
 
-        // Check Specific Logic: Alice Balance
-        assertEq(usdc.balanceOf(alice), 100_000e6 - depositAmount + withdrawAmount, "Alice should have correct USDC balance");
-        
-        // Check Specific Logic: Alice Shares (Profit retention)
-        uint256 expectedRemainingSharesMin = 2500e6;
-        assertGt(vault.balanceOf(alice), expectedRemainingSharesMin, "Alice should retain slightly more shares due to yield");
+        // ============ ASSERT: ALICE BALANCE ============
+        // Alice should have: Initial - Deposit + Withdrawn
+        assertEq(
+            usdc.balanceOf(alice),
+            ALICE_INITIAL_BALANCE - DEPOSIT_AMOUNT + withdrawAmount,
+            "Alice should have correct USDC balance"
+        );
 
-        // --- System Invariants Check ---
-        
-        // Underlying Assets (Physical Balance)
-        // Buffer consumed during withdrawal -> Both 0
+        // ============ ASSERT: ALICE SHARES (PROFIT RETENTION) ============
+        // Alice keeps more shares than half due to yield
+        uint256 expectedRemainingSharesMin = 2500e6;
+        assertGt(vault.balanceOf(alice), expectedRemainingSharesMin, "Alice should retain shares");
+
+        // ============ ASSERT: SYSTEM INVARIANTS ============
         assertEq(usdc.balanceOf(address(vault)), 0, "Vault should hold 0 underlying (buffer used)");
         assertEq(usdc.balanceOf(address(strategy)), 0, "Strategy should hold 0 underlying");
 
-        // Shares Ownership
-        assertEq(vault.totalSupply(), vault.balanceOf(alice) + vault.balanceOf(address(0x000000000000000000000000000000000000dEaD)), "Vault Total Supply Invariant");
+        assertEq(
+            vault.totalSupply(),
+            vault.balanceOf(alice) + vault.balanceOf(DEAD_ADDRESS),
+            "Vault Total Supply Invariant"
+        );
         assertEq(strategy.totalSupply(), strategy.balanceOf(address(vault)), "Strategy Total Supply Invariant");
 
-        // Managed Assets
-        // Buffer consumed -> Identical assets (allow 1 wei rounding)
-        assertApproxEqAbs(vault.totalAssets(), strategy.totalAssets(), 1, "Vault vs Strategy Assets Invariant (Equal)");
+        assertApproxEqAbs(vault.totalAssets(), strategy.totalAssets(), 1, "Vault vs Strategy Assets Invariant");
 
-        console.log("\n--- Final State Report (Withdraw) ---");
-        
-        console.log("Underlying Asset Held (Alice):", usdc.balanceOf(alice));
-        console.log("Underlying Asset Held (Vault):", usdc.balanceOf(address(vault)));
-        console.log("Underlying Asset Held (Strategy):", usdc.balanceOf(address(strategy)));
-        
-        console.log("Vault Shares (Alice):", vault.balanceOf(alice));
-        console.log("Vault Shares (Dead):", vault.balanceOf(address(0x000000000000000000000000000000000000dEaD)));
-        console.log("Strategy Shares (Vault):", strategy.balanceOf(address(vault)));
-
-        console.log("aUSDC Balance (Strategy):", aUsdc.balanceOf(address(strategy)));
-
-        console.log("Vault Total Supply:", vault.totalSupply());
-        console.log("Strategy Total Supply:", strategy.totalSupply());
-
-        console.log("Vault Total Managed Assets:", vault.totalAssets());
-        console.log("Strategy Total Managed Assets:", strategy.totalAssets());
+        _logState("Withdraw");
     }
 
+    /**
+     * @notice Tests that redeem correctly divests from Aave and includes yield.
+     * @dev Verifies:
+     *      - Share price increases with yield
+     *      - Redeem returns principal + proportional yield
+     *      - Remaining shares correctly calculated
+     */
     function test_RedeemDivestsFromAave() public {
-        uint256 depositAmount = 5000e6;
-
-        // Deposit
+        // ============ ARRANGE: DEPOSIT ============
         vm.startPrank(alice);
-        usdc.approve(address(vault), depositAmount);
-        vault.deposit(depositAmount, alice);
-        
-        // Check Strategy Balance BEFORE time travel
+        usdc.approve(address(vault), DEPOSIT_AMOUNT);
+        vault.deposit(DEPOSIT_AMOUNT, alice);
+
         uint256 strategyAssetsBefore = strategy.totalAssets();
         console.log("Strategy Total Managed Assets Initial:", strategyAssetsBefore);
 
-        // Time travel 1 day
+        // ============ ACT: TIME TRAVEL (1 DAY) ============
         vm.roll(block.number + 7200);
-        vm.warp(block.timestamp + 1 days); 
+        vm.warp(block.timestamp + 1 days);
 
-        // Check Strategy Balance AFTER time travel
         uint256 strategyAssetsAfter = strategy.totalAssets();
+        uint256 yieldGenerated = strategyAssetsAfter - strategyAssetsBefore;
+
         console.log("Strategy Total Managed Assets After 1 Day:", strategyAssetsAfter);
-        console.log("Yield Generated:", strategyAssetsAfter - strategyAssetsBefore); 
+        console.log("Yield Generated:", yieldGenerated);
 
-        // Check Vault has accumulated yield conceptually (via Strategy)
+        // ============ ASSERT: SHARE PRICE INCREASED ============
+        // 1e18 shares should now be worth more than 1e18 assets
         uint256 assetsPerShare = vault.convertToAssets(1e18);
-        assertGt(assetsPerShare, 1e18, "Share price should increase");
+        assertGt(assetsPerShare, 1e18, "Share price should increase with yield");
 
-        // REDEEM half of shares
-        uint256 sharesToRedeem = depositAmount / 2; // 2500 shares
+        // ============ ACT: REDEEM HALF OF SHARES ============
+        uint256 sharesToRedeem = DEPOSIT_AMOUNT / 2; // 2,500e6 shares
         vault.redeem(sharesToRedeem, alice, alice);
         vm.stopPrank();
 
-        // Check Specific Logic: Alice Balance (Principal + Yield)
-        uint256 expectedPrincipal = 2500e6; 
+        // ============ ASSERT: ALICE RECEIVED PRINCIPAL + YIELD ============
+        uint256 expectedPrincipal = 2500e6;
         uint256 aliceBalance = usdc.balanceOf(alice);
-        uint256 aliceInitial = 100_000e6;
-        uint256 aliceSpent = 5000e6;
-        assertGt(aliceBalance, aliceInitial - aliceSpent + expectedPrincipal, "Alice should receive principal + yield");
-        
-        // Check Specific Logic: Alice Remaining Shares
+
+        // Alice should receive more than just principal back
+        assertGt(
+            aliceBalance,
+            ALICE_INITIAL_BALANCE - DEPOSIT_AMOUNT + expectedPrincipal,
+            "Alice should receive principal + yield"
+        );
+
+        // ============ ASSERT: REMAINING SHARES ============
+        // Alice should have exactly half her shares remaining
         assertEq(vault.balanceOf(alice), 2500e6, "Alice should have exactly half shares remaining");
 
-        // --- System Invariants Check ---
-
-        // Underlying Assets (Physical Balance)
-        // Buffer consumed (>1000 assets redeemed)
+        // ============ ASSERT: SYSTEM INVARIANTS ============
         assertEq(usdc.balanceOf(address(vault)), 0, "Vault should hold 0 underlying (buffer used)");
         assertEq(usdc.balanceOf(address(strategy)), 0, "Strategy should hold 0 underlying");
 
-        // Shares Ownership
-        assertEq(vault.totalSupply(), vault.balanceOf(alice) + vault.balanceOf(address(0x000000000000000000000000000000000000dEaD)), "Vault Total Supply Invariant");
+        assertEq(
+            vault.totalSupply(),
+            vault.balanceOf(alice) + vault.balanceOf(DEAD_ADDRESS),
+            "Vault Total Supply Invariant"
+        );
         assertEq(strategy.totalSupply(), strategy.balanceOf(address(vault)), "Strategy Total Supply Invariant");
 
-        // Managed Assets
-        // Buffer consumed -> Identical assets (allow 1 wei rounding)
-        assertApproxEqAbs(vault.totalAssets(), strategy.totalAssets(), 1, "Vault vs Strategy Assets Invariant (Equal)");
+        assertApproxEqAbs(vault.totalAssets(), strategy.totalAssets(), 1, "Vault vs Strategy Assets Invariant");
 
-        console.log("\n--- Final State Report (Redeem) ---");
-        
+        _logState("Redeem");
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                              HELPERS
+    //////////////////////////////////////////////////////////////*/
+
+    /**
+     * @dev Logs the current state of the system for debugging.
+     * @param action The action that triggered this log (Deposit/Withdraw/Redeem).
+     */
+    function _logState(string memory action) internal view {
+        console.log("");
+        console.log("--- Final State Report (%s) ---", action);
+
+        // Physical token balances
         console.log("Underlying Asset Held (Alice):", usdc.balanceOf(alice));
         console.log("Underlying Asset Held (Vault):", usdc.balanceOf(address(vault)));
         console.log("Underlying Asset Held (Strategy):", usdc.balanceOf(address(strategy)));
-        
+
+        // Share balances
         console.log("Vault Shares (Alice):", vault.balanceOf(alice));
-        console.log("Vault Shares (Dead):", vault.balanceOf(address(0x000000000000000000000000000000000000dEaD)));
+        console.log("Vault Shares (Dead):", vault.balanceOf(DEAD_ADDRESS));
         console.log("Strategy Shares (Vault):", strategy.balanceOf(address(vault)));
 
+        // Aave position
         console.log("aUSDC Balance (Strategy):", aUsdc.balanceOf(address(strategy)));
 
+        // Totals
         console.log("Vault Total Supply:", vault.totalSupply());
         console.log("Strategy Total Supply:", strategy.totalSupply());
-
         console.log("Vault Total Managed Assets:", vault.totalAssets());
         console.log("Strategy Total Managed Assets:", strategy.totalAssets());
     }

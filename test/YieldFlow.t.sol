@@ -1,118 +1,189 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.33;
+pragma solidity 0.8.26;
 
 import {Test, console} from "forge-std/Test.sol";
-import {BetaVault} from "../src/vaults/BetaVault.sol";
-import {MockStrategy} from "../src/strategies/MockStrategy.sol";
+import {YieldBearingVault} from "../src/vaults/YieldBearingVault.sol";
+import {MockStrategy} from "./mocks/MockStrategy.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
-/// @title Mock ERC20
+/**
+ * @title MockERC20
+ * @notice Simple ERC20 token for testing.
+ */
 contract MockERC20 is ERC20 {
     constructor() ERC20("Mock USDC", "mUSDC") {
         _mint(msg.sender, 1_000_000e18);
     }
 }
 
+/**
+ * @title YieldFlowTest
+ * @notice Unit tests for yield flow mechanics in the vault system.
+ * @dev Tests deposit/withdraw flows, share pricing, and performance fees
+ *      using a MockStrategy that doesn't interact with external protocols.
+ */
 contract YieldFlowTest is Test {
+    /*//////////////////////////////////////////////////////////////
+                               STATE
+    //////////////////////////////////////////////////////////////*/
+
     MockERC20 public asset;
-    BetaVault public vault;
+    YieldBearingVault public vault;
     MockStrategy public strategy;
-    
-    // Constants for test values
-    uint256 constant INITIAL_SUPPLY_ALICE = 1000e18;
-    uint256 constant INITIAL_DEPOSIT_DEAD = 1000; // Small amoount in wei
-    uint256 constant DEPOSIT_AMOUNT = 100e18;
-    uint256 constant YIELD_AMOUNT_10_PERCENT = 10e18;
-    uint256 constant ONE_SHARE = 1e18;
-    
+
     address public owner;
     address public alice;
     address public bob;
 
+    /*//////////////////////////////////////////////////////////////
+                             CONSTANTS
+    //////////////////////////////////////////////////////////////*/
+
+    /** @notice Initial token balance for Alice. */
+    uint256 constant INITIAL_SUPPLY_ALICE = 1000e18;
+
+    /** @notice Required initial deposit burned to dead address (inflation protection). */
+    uint256 constant INITIAL_DEPOSIT_DEAD = 1000;
+
+    /** @notice Standard deposit amount used in tests. */
+    uint256 constant DEPOSIT_AMOUNT = 100e18;
+
+    /** @notice Simulated yield representing 10% gain on DEPOSIT_AMOUNT. */
+    uint256 constant YIELD_AMOUNT_10_PERCENT = 10e18;
+
+    /** @notice One share unit for price calculations. */
+    uint256 constant ONE_SHARE = 1e18;
+
+    /*//////////////////////////////////////////////////////////////
+                               SETUP
+    //////////////////////////////////////////////////////////////*/
+
     function setUp() public {
-        owner = address(this);
+        // ============ CREATE TEST ADDRESSES ============
+        owner = makeAddr("owner");
         alice = makeAddr("alice");
         bob = makeAddr("bob");
 
-        // Deploy Asset
+        vm.startPrank(owner);
+
+        // ============ DEPLOY MOCK ASSET ============
         asset = new MockERC20();
 
-        // Calculate Future Vault Address to approve initial deposit
-        // Note: standard forge-std computeCreateAddress usage
-        address vaultAddr = computeCreateAddress(address(this), vm.getNonce(address(this)));
-        
-        // Approve and Deploy
+        // ============ DEPLOY VAULT ============
+        // Pre-compute vault address to approve initial deposit before deployment
+        address vaultAddr = vm.computeCreateAddress(owner, vm.getNonce(owner));
         asset.approve(vaultAddr, INITIAL_DEPOSIT_DEAD);
-        vault = new BetaVault(asset, owner, INITIAL_DEPOSIT_DEAD);
+        vault = new YieldBearingVault(asset, owner, owner, INITIAL_DEPOSIT_DEAD);
 
-        // Deploy Strategy
+        // ============ DEPLOY & CONNECT STRATEGY ============
         strategy = new MockStrategy(asset, address(vault));
-
-        // Connect Strategy to Vault
         vault.setStrategy(strategy);
 
-        // Setup Alice
+        // ============ SETUP ALICE ============
         asset.transfer(alice, INITIAL_SUPPLY_ALICE);
-        vm.prank(owner);
         vault.addToWhitelist(alice);
+
+        vm.stopPrank();
     }
 
+    /*//////////////////////////////////////////////////////////////
+                               TESTS
+    //////////////////////////////////////////////////////////////*/
+
+    /**
+     * @notice Tests complete yield flow: deposit, yield generation, and withdrawal.
+     * @dev Verifies that:
+     *      - Deposits correctly route funds to strategy
+     *      - Simulated yield is reflected in totalAssets
+     *      - Withdrawals return principal + proportional yield
+     */
     function test_FullYieldFlow() public {
-        // --- DEPOSIT ---
-        // Expect 1:1 shares
-        
+        // ============ ARRANGE ============
+        // Alice starts with INITIAL_SUPPLY_ALICE tokens
+        // Vault has INITIAL_DEPOSIT_DEAD buffer from construction
+
+        // ============ ACT: DEPOSIT ============
         vm.startPrank(alice);
         asset.approve(address(vault), DEPOSIT_AMOUNT);
         vault.deposit(DEPOSIT_AMOUNT, alice);
         vm.stopPrank();
 
-        // Vault should hold the initial dead assets
+        // ============ ASSERT: POST-DEPOSIT STATE ============
+        // Vault retains initial buffer (1000 wei)
         assertEq(asset.balanceOf(address(vault)), INITIAL_DEPOSIT_DEAD, "Vault should hold initial dead assets");
-        // Strategy should hold user funds
+        // Strategy holds all user deposits
         assertEq(asset.balanceOf(address(strategy)), DEPOSIT_AMOUNT, "Strategy should hold user funds");
-        // Alice has shares (1:1 ratio maintained)
-        assertEq(vault.balanceOf(alice), DEPOSIT_AMOUNT, "Alice should have shares");
+        // Alice receives 1:1 shares for deposit
+        assertEq(vault.balanceOf(alice), DEPOSIT_AMOUNT, "Alice should have shares equal to deposit");
 
-        // --- SIMULATE YIELD (10% Gain) ---
+        // ============ ACT: SIMULATE YIELD (10% GAIN) ============
+        // Transfer tokens directly to strategy to simulate external protocol yield
+        vm.prank(owner);
         asset.transfer(address(strategy), YIELD_AMOUNT_10_PERCENT);
 
-        // Total Assets should be user deposit + yield + initial dead assets
-        assertApproxEqAbs(vault.totalAssets(), DEPOSIT_AMOUNT + YIELD_AMOUNT_10_PERCENT + INITIAL_DEPOSIT_DEAD, 3, "Total assets should include yield and dead assets");
+        // ============ ASSERT: YIELD REFLECTED IN TOTAL ASSETS ============
+        // Total = User Deposit + Yield + Dead Buffer
+        assertApproxEqAbs(
+            vault.totalAssets(),
+            DEPOSIT_AMOUNT + YIELD_AMOUNT_10_PERCENT + INITIAL_DEPOSIT_DEAD,
+            3,
+            "Total assets should include yield and dead assets"
+        );
 
-        // --- WITHDRAW ---
+        // ============ ACT: FULL WITHDRAWAL ============
         vm.startPrank(alice);
-        vault.redeem(DEPOSIT_AMOUNT, alice, alice); // Redeeming all shares
+        vault.redeem(DEPOSIT_AMOUNT, alice, alice);
         vm.stopPrank();
 
-        // Alice gets principal + yield (approx 200 wei error due to dead shares dilution)
-        assertApproxEqAbs(asset.balanceOf(alice), INITIAL_SUPPLY_ALICE + YIELD_AMOUNT_10_PERCENT, 200, "Alice should have profit");
-        // Vault should still hold initial dead assets (plus accumulated yield for dead shares)
+        // ============ ASSERT: ALICE RECEIVED PRINCIPAL + YIELD ============
+        // Alice should have original balance + yield (minus ~200 wei dust for dead shares)
+        assertApproxEqAbs(
+            asset.balanceOf(alice), INITIAL_SUPPLY_ALICE + YIELD_AMOUNT_10_PERCENT, 200, "Alice should have profit"
+        );
+        // Vault retains dead shares worth of assets
         assertGe(vault.totalAssets(), INITIAL_DEPOSIT_DEAD, "Vault should hold dead assets after exit");
     }
 
+    /**
+     * @notice Tests that non-whitelisted addresses cannot deposit.
+     * @dev Verifies whitelist enforcement on deposit operations.
+     */
     function test_RevertIfNotWhitelisted() public {
-        // Fund Bob first
+        // ============ ARRANGE ============
         uint256 smallAmount = 100;
+
+        // Fund Bob (who is NOT whitelisted)
+        vm.prank(owner);
         asset.transfer(bob, smallAmount);
 
-        vm.startPrank(bob); // Bob is not whitelisted
+        // ============ ACT & ASSERT ============
+        vm.startPrank(bob);
         asset.approve(address(vault), smallAmount);
-        
-        // Use selector for custom error: NotWhitelisted(address)
+
+        // Expect revert with NotWhitelisted error
         bytes4 errorSelector = bytes4(keccak256("NotWhitelisted(address)"));
         vm.expectRevert(abi.encodeWithSelector(errorSelector, bob));
-        
+
         vault.deposit(smallAmount, bob);
         vm.stopPrank();
     }
 
+    /**
+     * @notice Tests share price evolution through deposit and yield.
+     * @dev Tracks how convertToAssets changes as:
+     *      1. Users deposit (dilution)
+     *      2. Yield accrues (appreciation)
+     *      3. Users withdraw (concentration)
+     */
     function test_SharePriceEvolution() public {
+        // ============ PHASE 1: INITIAL STATE ============
         console.log("--- Initial State (After Construction) ---");
         console.log("Share Price (Assets per 1 Share):", vault.convertToAssets(ONE_SHARE));
         console.log("Total Assets:", vault.totalAssets());
         console.log("Total Supply:", vault.totalSupply());
+        // Share price starts at 1:1 (1e18 assets per 1e18 shares)
 
-        // INVEST (Deposit)
+        // ============ PHASE 2: ALICE DEPOSITS ============
         vm.startPrank(alice);
         asset.approve(address(vault), DEPOSIT_AMOUNT);
         vault.deposit(DEPOSIT_AMOUNT, alice);
@@ -122,19 +193,20 @@ contract YieldFlowTest is Test {
         console.log("Share Price (Assets per 1 Share):", vault.convertToAssets(ONE_SHARE));
         console.log("Total Assets:", vault.totalAssets());
         console.log("Total Supply:", vault.totalSupply());
+        // Share price remains 1:1 (no yield yet)
 
-        // YIELD GENERATION (Simulated)
-        // Add 40% yield to strategy
+        // ============ PHASE 3: YIELD GENERATION (40%) ============
         uint256 simulatedYield = 40e18;
+        vm.prank(owner);
         asset.transfer(address(strategy), simulatedYield);
 
-        console.log("\n--- After 40% Yield Generation ---");
+        console.log("\n--- After 40%% Yield Generation ---");
         console.log("Share Price (Assets per 1 Share):", vault.convertToAssets(ONE_SHARE));
         console.log("Total Assets:", vault.totalAssets());
         console.log("Total Supply:", vault.totalSupply());
+        // Share price increases: ~1.4 assets per share
 
-        // DIVEST / WITHDRAW FULL (Everything)
-        // Alice withdraws ALL her shares (DEPOSIT_AMOUNT)
+        // ============ PHASE 4: ALICE EXITS ============
         vm.startPrank(alice);
         vault.redeem(DEPOSIT_AMOUNT, alice, alice);
         vm.stopPrank();
@@ -143,59 +215,67 @@ contract YieldFlowTest is Test {
         console.log("Share Price (Assets per 1 Share):", vault.convertToAssets(ONE_SHARE));
         console.log("Total Assets:", vault.totalAssets());
         console.log("Total Supply:", vault.totalSupply());
+        // Only dead shares remain, price reflects accumulated yield
     }
-    function test_PerformanceFeeLogic() public {
-        // 1. Setup Fees
-        address feeRecipient = makeAddr("feeRecipient");
-        vault.setFeeRecipient(feeRecipient);
-        vault.setProtocolFee(1000); // 10% on profit
 
-        // 2. Deposit
+    /**
+     * @notice Tests performance fee logic with High Water Mark.
+     * @dev Verifies that:
+     *      - No fees charged on principal deposits
+     *      - Fees correctly calculated as % of profit
+     *      - High Water Mark prevents double-taxation
+     *      - Fees triggered on withdrawal
+     */
+    function test_PerformanceFeeLogic() public {
+        // ============ ARRANGE: SETUP FEES ============
+        address feeRecipient = makeAddr("feeRecipient");
+
+        vm.startPrank(owner);
+        vault.setFeeRecipient(feeRecipient);
+        vault.setProtocolFee(1000); // 10% performance fee (1000 bps)
+        vm.stopPrank();
+
+        // ============ ACT: DEPOSIT ============
         vm.startPrank(alice);
         asset.approve(address(vault), DEPOSIT_AMOUNT);
         vault.deposit(DEPOSIT_AMOUNT, alice);
         vm.stopPrank();
 
-        // 3. Verify No Fee on Principal
-        // Fees are assessed on deposit, but HWM should match Total Assets initially (plus deposit logic)
-        // No profit generated yet.
+        // ============ ASSERT: NO FEE ON PRINCIPAL ============
+        // Fee recipient should have 0 shares after deposit (no profit yet)
         assertEq(vault.balanceOf(feeRecipient), 0, "No fees should be paid on principal deposit");
 
-        // 4. Generate Yield (Profit)
-        uint256 profit = 20e18; // 20% gain
+        // ============ ACT: GENERATE YIELD (20% GAIN) ============
+        uint256 profit = 20e18;
+        vm.prank(owner);
         asset.transfer(address(strategy), profit);
-        
-        // 5. Trigger Fee Assessment (Manual)
+
+        // ============ ACT: TRIGGER FEE ASSESSMENT ============
         vault.assessPerformanceFee();
 
-        // 6. Verify Fee Payment
-        // Fee = 10% of 20 = 2 assets worth of shares.
-        // Shares minted will be relative to current share price.
+        // ============ ASSERT: FEE CORRECTLY CALCULATED ============
+        // Fee = 10% of 20e18 profit = 2e18 worth of shares
         uint256 recipientShares = vault.balanceOf(feeRecipient);
         assertGt(recipientShares, 0, "Fee recipient should have received shares");
-        
+
         uint256 feeAssetsApprox = vault.convertToAssets(recipientShares);
         assertApproxEqAbs(feeAssetsApprox, 2e18, 0.1e18, "Fee value should be approx 10% of profit");
 
-        // 7. Verify High Watermark Updated
-        // Second assessment should yield 0 fees unless new profit
-        uint256 sharesBeforeOnly = vault.balanceOf(feeRecipient);
-        vault.assessPerformanceFee();
-        assertEq(vault.balanceOf(feeRecipient), sharesBeforeOnly, "No double counting of fees");
+        // ============ ASSERT: HIGH WATER MARK PREVENTS DOUBLE-TAXATION ============
+        uint256 sharesBeforeSecondAssess = vault.balanceOf(feeRecipient);
+        vault.assessPerformanceFee(); // Call again without new profit
+        assertEq(vault.balanceOf(feeRecipient), sharesBeforeSecondAssess, "No double counting of fees");
 
-        // 8. Withdraw Trigger
-        // Generate more yield
+        // ============ ACT: MORE YIELD + WITHDRAWAL ============
         uint256 moreProfit = 10e18;
+        vm.prank(owner);
         asset.transfer(address(strategy), moreProfit);
-        
+
         vm.startPrank(alice);
-        // Withdraw should convert shares. 
-        // Note: Alice's shares are now diluted by the fee shares, so she gets slightly less of the "total pie" than 100%, 
-        // but she gets her principal + 90% of profit.
-        vault.redeem(DEPOSIT_AMOUNT, alice, alice); 
+        vault.redeem(DEPOSIT_AMOUNT, alice, alice);
         vm.stopPrank();
 
-        // Verify fees increased again during withdraw trigger
-        assertGt(vault.balanceOf(feeRecipient), sharesBeforeOnly, "Withdraw should have triggered 2nd fee payment");
+        // ============ ASSERT: WITHDRAWAL TRIGGERED NEW FEE ============
+        assertGt(vault.balanceOf(feeRecipient), sharesBeforeSecondAssess, "Withdraw should trigger fee payment");
     }
 }
