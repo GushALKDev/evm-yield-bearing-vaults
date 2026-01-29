@@ -20,8 +20,8 @@ contract AaveSimpleLendingStrategy is BaseStrategy {
                                 STORAGE
     //////////////////////////////////////////////////////////////*/
 
-    address public immutable aavePool;
-    address public immutable aToken;
+    address public immutable AAVE_POOL;
+    address public immutable A_TOKEN;
 
     /*//////////////////////////////////////////////////////////////
                                  ERRORS
@@ -36,8 +36,8 @@ contract AaveSimpleLendingStrategy is BaseStrategy {
     constructor(IERC20 _asset, address _vault, address _aavePool, address _aToken)
         BaseStrategy(_asset, _vault, "Aave Strategy", "sAAVE")
     {
-        aavePool = _aavePool;
-        aToken = _aToken;
+        AAVE_POOL = _aavePool;
+        A_TOKEN = _aToken;
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -45,11 +45,11 @@ contract AaveSimpleLendingStrategy is BaseStrategy {
     //////////////////////////////////////////////////////////////*/
 
     function _invest(uint256 assets) internal override {
-        AaveAdapter.supply(aavePool, address(asset()), assets);
+        AaveAdapter.supply(AAVE_POOL, address(asset()), assets);
     }
 
     function _divest(uint256 assets) internal override {
-        AaveAdapter.withdraw(aavePool, address(asset()), assets);
+        AaveAdapter.withdraw(AAVE_POOL, address(asset()), assets);
     }
 
     /**
@@ -70,6 +70,6 @@ contract AaveSimpleLendingStrategy is BaseStrategy {
      * @dev Measured by the aToken balance which includes accrued interest.
      */
     function totalAssets() public view override returns (uint256) {
-        return IERC20(aToken).balanceOf(address(this));
+        return IERC20(A_TOKEN).balanceOf(address(this));
     }
 }

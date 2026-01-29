@@ -23,6 +23,7 @@ contract MockERC20 is ERC20 {
  *      using a MockStrategy that doesn't interact with external protocols.
  */
 contract YieldFlowTest is Test {
+
     /*//////////////////////////////////////////////////////////////
                                STATE
     //////////////////////////////////////////////////////////////*/
@@ -39,19 +40,29 @@ contract YieldFlowTest is Test {
                              CONSTANTS
     //////////////////////////////////////////////////////////////*/
 
-    /** @notice Initial token balance for Alice. */
+    /**
+     * @notice Initial token balance for Alice.
+     */
     uint256 constant INITIAL_SUPPLY_ALICE = 1000e18;
 
-    /** @notice Required initial deposit burned to dead address (inflation protection). */
+    /**
+     * @notice Required initial deposit burned to dead address (inflation protection).
+     */
     uint256 constant INITIAL_DEPOSIT_DEAD = 1000;
 
-    /** @notice Standard deposit amount used in tests. */
+    /**
+     * @notice Standard deposit amount used in tests.
+     */
     uint256 constant DEPOSIT_AMOUNT = 100e18;
 
-    /** @notice Simulated yield representing 10% gain on DEPOSIT_AMOUNT. */
+    /**
+     * @notice Simulated yield representing 10% gain on DEPOSIT_AMOUNT.
+     */
     uint256 constant YIELD_AMOUNT_10_PERCENT = 10e18;
 
-    /** @notice One share unit for price calculations. */
+    /**
+     * @notice One share unit for price calculations.
+     */
     uint256 constant ONE_SHARE = 1e18;
 
     /*//////////////////////////////////////////////////////////////

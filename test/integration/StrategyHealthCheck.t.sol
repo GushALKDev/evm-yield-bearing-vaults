@@ -145,7 +145,7 @@ contract StrategyHealthCheckTest is Test {
         // ============ ASSERT ============
         assertTrue(isHealthy, "Position should be healthy");
 
-        (,,,,,uint256 healthFactor) = aavePool.getUserAccountData(address(wethStrategy));
+        (,,,,, uint256 healthFactor) = aavePool.getUserAccountData(address(wethStrategy));
         console.log("Health Factor:", healthFactor);
         assertGe(healthFactor, MIN_HEALTH_FACTOR, "Health factor should be above minimum");
     }

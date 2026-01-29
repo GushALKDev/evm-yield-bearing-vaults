@@ -96,18 +96,30 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
     //////////////////////////////////////////////////////////////*/
 
     modifier whenNotEmergency() {
-        if (emergencyMode) revert VaultInEmergency();
+        _whenNotEmergency();
         _;
     }
 
     modifier onlyAdmin() {
-        if (msg.sender != admin) revert NotAdmin();
+        _onlyAdmin();
         _;
     }
 
     modifier onlyStrategy() {
-        if (msg.sender != address(strategy)) revert NotStrategy();
+        _onlyStrategy();
         _;
+    }
+
+    function _whenNotEmergency() internal view {
+        if (emergencyMode) revert VaultInEmergency();
+    }
+
+    function _onlyAdmin() internal view {
+        if (msg.sender != admin) revert NotAdmin();
+    }
+
+    function _onlyStrategy() internal view {
+        if (msg.sender != address(strategy)) revert NotStrategy();
     }
 
     /*//////////////////////////////////////////////////////////////

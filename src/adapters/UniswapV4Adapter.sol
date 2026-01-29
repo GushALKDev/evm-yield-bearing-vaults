@@ -20,7 +20,7 @@ abstract contract UniswapV4Adapter is IUnlockCallback {
                                 STORAGE
     //////////////////////////////////////////////////////////////*/
 
-    IPoolManager public immutable poolManager;
+    IPoolManager public immutable POOL_MANAGER;
 
     /*//////////////////////////////////////////////////////////////
                                  ERRORS
@@ -33,7 +33,7 @@ abstract contract UniswapV4Adapter is IUnlockCallback {
     //////////////////////////////////////////////////////////////*/
 
     constructor(address _poolManager) {
-        poolManager = IPoolManager(_poolManager);
+        POOL_MANAGER = IPoolManager(_poolManager);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -44,7 +44,7 @@ abstract contract UniswapV4Adapter is IUnlockCallback {
      * @dev Borrowed funds must be repaid within the same transaction.
      */
     function flashLoan(Currency currency, uint256 amount, bytes memory data) internal {
-        poolManager.unlock(abi.encode(currency, amount, data));
+        POOL_MANAGER.unlock(abi.encode(currency, amount, data));
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -55,17 +55,17 @@ abstract contract UniswapV4Adapter is IUnlockCallback {
      * @dev Executes flash loan logic and ensures repayment via sync/transfer/settle pattern.
      */
     function unlockCallback(bytes calldata data) external override returns (bytes memory) {
-        if (msg.sender != address(poolManager)) revert CallbackUnauthorized();
+        if (msg.sender != address(POOL_MANAGER)) revert CallbackUnauthorized();
 
         (Currency currency, uint256 amount, bytes memory userData) = abi.decode(data, (Currency, uint256, bytes));
 
-        poolManager.take(currency, address(this), amount);
+        POOL_MANAGER.take(currency, address(this), amount);
         _onFlashLoan(currency, amount, userData);
 
         // Repay flash loan
-        poolManager.sync(currency);
-        IERC20(Currency.unwrap(currency)).safeTransfer(address(poolManager), amount);
-        poolManager.settle();
+        POOL_MANAGER.sync(currency);
+        IERC20(Currency.unwrap(currency)).safeTransfer(address(POOL_MANAGER), amount);
+        POOL_MANAGER.settle();
 
         return "";
     }

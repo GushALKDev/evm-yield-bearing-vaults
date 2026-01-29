@@ -39,37 +39,59 @@ contract WETHLoopStrategyTest is Test {
                              CONSTANTS
     //////////////////////////////////////////////////////////////*/
 
-    /** @notice WETH token address on Ethereum Mainnet. */
+    /**
+     * @notice WETH token address on Ethereum Mainnet.
+     */
     address constant WETH_MAINNET = Constants.ETHEREUM_MAINNET_WETH;
 
-    /** @notice Aave V3 Pool address on Ethereum Mainnet. */
+    /**
+     * @notice Aave V3 Pool address on Ethereum Mainnet.
+     */
     address constant AAVE_V3_POOL = Constants.ETHEREUM_MAINNET_AAVE_V3_POOL;
 
-    /** @notice aWETH token address (Aave interest-bearing WETH). */
+    /**
+     * @notice aWETH token address (Aave interest-bearing WETH).
+     */
     address constant AWETH_TOKEN = Constants.ETHEREUM_MAINNET_AAVE_V3_WETH_ATOKEN;
 
-    /** @notice Variable debt WETH token address. */
+    /**
+     * @notice Variable debt WETH token address.
+     */
     address constant VARIABLE_DEBT_WETH = Constants.ETHEREUM_MAINNET_AAVE_V3_WETH_VARIABLE_DEBT;
 
-    /** @notice Uniswap V4 PoolManager for flash loans. */
+    /**
+     * @notice Uniswap V4 PoolManager for flash loans.
+     */
     address constant UNISWAP_V4_POOL_MANAGER = Constants.UNISWAP_V4_POOL_MANAGER;
 
-    /** @notice Aave V3 Pool Address Provider. */
+    /**
+     * @notice Aave V3 Pool Address Provider.
+     */
     address constant AAVE_ADDRESS_PROVIDER = Constants.ETHEREUM_MAINNET_AAVE_V3_ADDRESS_PROVIDER;
 
-    /** @notice Required initial deposit for vault (inflation protection). */
+    /**
+     * @notice Required initial deposit for vault (inflation protection).
+     */
     uint256 constant INITIAL_DEPOSIT = 1000;
 
-    /** @notice Target leverage for the strategy (10x). */
+    /**
+     * @notice Target leverage for the strategy (10x).
+     */
     uint8 constant TARGET_LEVERAGE = 10;
 
-    /** @notice Minimum health factor threshold (1.02). */
+    /**
+     * @notice Minimum health factor threshold (1.02).
+     */
     uint256 constant MIN_HEALTH_FACTOR = 1.02e18;
 
-    /** @notice Target health factor to maintain (1.05). */
+    /**
+     * @notice Target health factor to maintain (1.05).
+     */
     uint256 constant TARGET_HEALTH_FACTOR = 1.05e18;
 
-    /** @notice E-Mode category for ETH-correlated assets (93% LTV). */
+    /**
+     * @notice E-Mode category for ETH-correlated assets (93% LTV).
+     */
     uint8 constant EMODE_ETH_CORRELATED = 1;
 
     /*//////////////////////////////////////////////////////////////
@@ -479,7 +501,9 @@ contract WETHLoopStrategyTest is Test {
             console.log("User2 Expected Assets:", user2ExpectedAssets);
 
             // Allow 0.1% tolerance for user2's position
-            assertApproxEqAbs(user2ExpectedAssets, user2Deposit, 0.002 ether, "User2 should still have their deposit value");
+            assertApproxEqAbs(
+                user2ExpectedAssets, user2Deposit, 0.002 ether, "User2 should still have their deposit value"
+            );
         }
     }
 

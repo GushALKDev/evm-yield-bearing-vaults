@@ -25,28 +25,44 @@ contract AaveSimpleStrategyForkTest is Test {
                              CONSTANTS
     //////////////////////////////////////////////////////////////*/
 
-    /** @notice USDC token address on Ethereum Mainnet (6 decimals). */
+    /**
+     * @notice USDC token address on Ethereum Mainnet (6 decimals).
+     */
     address constant USDC = Constants.ETHEREUM_MAINNET_USDC;
 
-    /** @notice Aave V3 Pool address on Ethereum Mainnet. */
+    /**
+     * @notice Aave V3 Pool address on Ethereum Mainnet.
+     */
     address constant AAVE_POOL = Constants.ETHEREUM_MAINNET_AAVE_V3_POOL;
 
-    /** @notice aUSDC token address (Aave interest-bearing USDC). */
+    /**
+     * @notice aUSDC token address (Aave interest-bearing USDC).
+     */
     address constant A_USDC = Constants.ETHEREUM_MAINNET_AAVE_V3_USDC_ATOKEN;
 
-    /** @notice Required initial deposit for vault (inflation protection). */
+    /**
+     * @notice Required initial deposit for vault (inflation protection).
+     */
     uint256 constant REQUIRED_DEPOSIT = 1000;
 
-    /** @notice Initial USDC balance for Alice (100,000 USDC). */
+    /**
+     * @notice Initial USDC balance for Alice (100,000 USDC).
+     */
     uint256 constant ALICE_INITIAL_BALANCE = 100_000e6;
 
-    /** @notice Initial USDC balance for Owner (10,000 USDC). */
+    /**
+     * @notice Initial USDC balance for Owner (10,000 USDC).
+     */
     uint256 constant OWNER_INITIAL_BALANCE = 10_000e6;
 
-    /** @notice Standard deposit amount for tests (5,000 USDC). */
+    /**
+     * @notice Standard deposit amount for tests (5,000 USDC).
+     */
     uint256 constant DEPOSIT_AMOUNT = 5000e6;
 
-    /** @notice Dead address that holds burned shares. */
+    /**
+     * @notice Dead address that holds burned shares.
+     */
     address constant DEAD_ADDRESS = 0x000000000000000000000000000000000000dEaD;
 
     /*//////////////////////////////////////////////////////////////
@@ -130,9 +146,7 @@ contract AaveSimpleStrategyForkTest is Test {
         // ============ ASSERT: SHARE OWNERSHIP INVARIANTS ============
         // Vault shares = Alice + Dead
         assertEq(
-            vault.totalSupply(),
-            vault.balanceOf(alice) + vault.balanceOf(DEAD_ADDRESS),
-            "Vault Total Supply Invariant"
+            vault.totalSupply(), vault.balanceOf(alice) + vault.balanceOf(DEAD_ADDRESS), "Vault Total Supply Invariant"
         );
         // Strategy shares = Vault's holdings
         assertEq(strategy.totalSupply(), strategy.balanceOf(address(vault)), "Strategy Total Supply Invariant");
@@ -200,9 +214,7 @@ contract AaveSimpleStrategyForkTest is Test {
         assertEq(usdc.balanceOf(address(strategy)), 0, "Strategy should hold 0 underlying");
 
         assertEq(
-            vault.totalSupply(),
-            vault.balanceOf(alice) + vault.balanceOf(DEAD_ADDRESS),
-            "Vault Total Supply Invariant"
+            vault.totalSupply(), vault.balanceOf(alice) + vault.balanceOf(DEAD_ADDRESS), "Vault Total Supply Invariant"
         );
         assertEq(strategy.totalSupply(), strategy.balanceOf(address(vault)), "Strategy Total Supply Invariant");
 
@@ -267,9 +279,7 @@ contract AaveSimpleStrategyForkTest is Test {
         assertEq(usdc.balanceOf(address(strategy)), 0, "Strategy should hold 0 underlying");
 
         assertEq(
-            vault.totalSupply(),
-            vault.balanceOf(alice) + vault.balanceOf(DEAD_ADDRESS),
-            "Vault Total Supply Invariant"
+            vault.totalSupply(), vault.balanceOf(alice) + vault.balanceOf(DEAD_ADDRESS), "Vault Total Supply Invariant"
         );
         assertEq(strategy.totalSupply(), strategy.balanceOf(address(vault)), "Strategy Total Supply Invariant");
 

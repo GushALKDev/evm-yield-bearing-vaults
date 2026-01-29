@@ -22,7 +22,7 @@ abstract contract BaseStrategy is ERC4626 {
                                 STORAGE
     //////////////////////////////////////////////////////////////*/
 
-    address public immutable vault;
+    address public immutable VAULT;
     bool public emergencyMode;
 
     /*//////////////////////////////////////////////////////////////
@@ -47,7 +47,7 @@ abstract contract BaseStrategy is ERC4626 {
         ERC4626(_asset)
         ERC20(_name, _symbol)
     {
-        vault = _vault;
+        VAULT = _vault;
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -55,18 +55,30 @@ abstract contract BaseStrategy is ERC4626 {
     //////////////////////////////////////////////////////////////*/
 
     modifier onlyVault() {
-        if (msg.sender != vault) revert OnlyVault();
+        _onlyVault();
         _;
     }
 
     modifier whenNotEmergency() {
-        if (emergencyMode) revert StrategyInEmergency();
+        _whenNotEmergency();
         _;
     }
 
     modifier onlyVaultAdmin() {
-        if (msg.sender != BaseVault(vault).admin()) revert NotVaultAdmin();
+        _onlyVaultAdmin();
         _;
+    }
+
+    function _onlyVault() internal view {
+        if (msg.sender != VAULT) revert OnlyVault();
+    }
+
+    function _whenNotEmergency() internal view {
+        if (emergencyMode) revert StrategyInEmergency();
+    }
+
+    function _onlyVaultAdmin() internal view {
+        if (msg.sender != BaseVault(VAULT).admin()) revert NotVaultAdmin();
     }
 
     /*//////////////////////////////////////////////////////////////

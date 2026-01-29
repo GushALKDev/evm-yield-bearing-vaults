@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import {Test, console} from "forge-std/Test.sol";
+import {Test} from "forge-std/Test.sol";
 import {WETHLoopStrategy} from "../../src/strategies/WETHLoopStrategy.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {IPool} from "../../src/interfaces/aave/IPool.sol";
 import {Constants} from "../../src/utils/Constants.sol";
 import {YieldBearingVault} from "../../src/vaults/YieldBearingVault.sol";
 
@@ -339,7 +338,7 @@ contract WETHLoopStrategyErrorPathsTest is Test {
      */
     function test_ImmutableValues() public {
         // ============ ASSERT ============
-        assertEq(strategy.vault(), address(vault), "Vault address should be set");
+        assertEq(strategy.VAULT(), address(vault), "Vault address should be set");
         assertEq(address(strategy.asset()), WETH_MAINNET, "Asset should be WETH");
         assertEq(strategy.targetLeverage(), TARGET_LEVERAGE, "Target leverage should be set");
         assertEq(strategy.minHealthFactor(), MIN_HEALTH_FACTOR, "Min health factor should be set");

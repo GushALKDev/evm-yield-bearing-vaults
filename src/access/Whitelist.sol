@@ -39,10 +39,14 @@ abstract contract Whitelist is Ownable {
     //////////////////////////////////////////////////////////////*/
 
     modifier onlyWhitelisted(address account) {
+        _onlyWhitelisted(account);
+        _;
+    }
+
+    function _onlyWhitelisted(address account) internal view {
         if (!isWhitelisted[account]) {
             revert NotWhitelisted(account);
         }
-        _;
     }
 
     /*//////////////////////////////////////////////////////////////
