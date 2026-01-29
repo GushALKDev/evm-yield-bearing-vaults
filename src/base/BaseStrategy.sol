@@ -105,9 +105,26 @@ abstract contract BaseStrategy is ERC4626 {
                            ADMIN FUNCTIONS
     //////////////////////////////////////////////////////////////*/
 
-    function setEmergencyMode(bool _isOpen) external onlyVault {
-        emergencyMode = _isOpen;
-        emit EmergencyModeSet(_isOpen);
+    function setEmergencyMode(bool _active) external onlyVault {
+        bool wasInEmergency = emergencyMode;
+        emergencyMode = _active;
+        emit EmergencyModeSet(_active);
+
+        // If deactivating emergency mode, reinvest available assets
+        if (wasInEmergency && !_active) {
+            _reinvest();
+        }
+    }
+
+    /**
+     * @dev Reinvests all available assets after emergency mode is deactivated.
+     *      Strategy balance is invested back into the protocol.
+     */
+    function _reinvest() internal virtual {
+        uint256 availableAssets = IERC20(asset()).balanceOf(address(this));
+        if (availableAssets > 0) {
+            _invest(availableAssets);
+        }
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -124,9 +141,15 @@ abstract contract BaseStrategy is ERC4626 {
 
     /**
      * @dev Divests assets from the external protocol before withdrawal.
+     *      In emergency mode, skip divest since position is already closed.
+     *      Assets are held directly in the strategy after emergency divest,
+     *      so we only need to transfer them to the receiver.
      */
     function _withdraw(address caller, address receiver, address owner, uint256 assets, uint256 shares) internal virtual override {
-        _divest(assets);
+        // Only divest if not in emergency mode (position already closed during emergency)
+        if (!emergencyMode) {
+            _divest(assets);
+        }
         super._withdraw(caller, receiver, owner, assets, shares);
     }
 
@@ -142,5 +165,5 @@ abstract contract BaseStrategy is ERC4626 {
     function _divest(uint256 assets) internal virtual;
 
     function harvest() external virtual;
-    function checkHealth() external view virtual returns (bool);
+    function checkHealth() external virtual returns (bool);
 }

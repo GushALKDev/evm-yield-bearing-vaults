@@ -17,6 +17,10 @@ A modular ERC-4626 vault system with pluggable yield strategies, featuring lever
 
 - **Leveraged Loop Strategy** - Atomic **Uniswap V4 Flash Loan** (zero fee) + **Aave V3 E-Mode** strategy to cycle liquidity, maximizing LTV (up to 93%) and capturing yield spread with up to 10x leverage. Uniswap V4 is preferred over other providers because it offers flash loans with no protocol fees.
 
+- **Automatic Health Monitoring** - Continuous position health checks with automatic emergency divest when health factor drops below threshold, preventing liquidations while maintaining user fund access.
+
+- **Emergency Recovery** - Seamless automatic reinvestment when emergency mode is deactivated, restoring leveraged positions without manual intervention.
+
 - **Defensive Security** - Critical protections including **Emergency Circuit Breakers** (pausing), **Reentrancy Guards**, and **Inflation Attack Prevention** (dead shares mechanism).
 
 - **Financial Integrity** - **High Water Mark** accounting ensures performance fees are only charged on net profits, preventing double taxation.
@@ -96,7 +100,27 @@ Example with 50% withdrawal from 10 WETH collateral / 9 WETH debt:
 - Withdraw: 5 WETH collateral | Repay: 4.5 WETH debt | Return: 0.5 WETH to user
 ```
 
-> **Why Uniswap V4?** I utilize Uniswap V4 for flash loans because it is currently **zero-fee**. Unlike other protocols (such as Aave V3 which charges 0.05%), this allows us to maximize the efficiency of leveraged positions without losing yield to flash loan premiums.
+### Emergency Divest (Automatic Safety)
+
+```
+1. checkHealth() detects healthFactor < minHealthFactor
+2. Strategy activates emergency mode on vault
+3. Strategy requests totalDebt flash loan from Uniswap V4
+4. Strategy repays all debt to Aave
+5. Strategy withdraws all collateral from Aave
+6. Strategy repays flash loan with withdrawn collateral
+7. Result: Position fully closed, funds held as WETH in strategy
+8. Emergency mode active: Deposits blocked, withdrawals allowed
+
+Recovery from emergency:
+1. Admin deactivates emergency mode on vault
+2. Vault propagates to strategy
+3. Strategy automatically reinvests all WETH balance
+4. Position restored with target leverage
+5. System returns to normal operation
+```
+
+> **Why Uniswap V4?** The protocol utilizes Uniswap V4 for flash loans because it is currently **zero-fee**. Unlike other protocols (such as Aave V3 which charges 0.05%), this maximizes the efficiency of leveraged positions without losing yield to flash loan premiums.
 
 
 ## Installation
@@ -141,8 +165,11 @@ forge test --gas-report
 | Inflation Attack | Initial 1000 wei deposit burned to dead address |
 | Reentrancy | OpenZeppelin ReentrancyGuard on all entry points |
 | Emergency Mode | Circuit breaker pauses deposits, allows withdrawals |
-| Access Control | Whitelist for deposits, Admin for configuration |
+| Automatic Health Monitoring | Strategy auto-divests on low health factor |
+| Emergency Recovery | Automatic reinvestment when emergency mode is lifted |
+| Access Control | Whitelist for deposits, Admin for configuration, Strategy can only activate (not deactivate) emergency |
 | Fee Exploitation | High Water Mark prevents fee gaming |
+| Optimized Withdrawals | Skip divest during emergency (position already closed) |
 
 ## Tech Stack
 
@@ -154,12 +181,12 @@ forge test --gas-report
 
 ## Testing
 
-Comprehensive test suite with **135 tests** achieving **93.72% code coverage**.
+Comprehensive test suite with **139 tests** achieving **93.72% code coverage**.
 
 ### Test Statistics
-- **Total Tests**: 135 (100% pass rate)
+- **Total Tests**: 139 (100% pass rate)
 - **Unit Tests**: 100
-- **Integration Tests**: 35
+- **Integration Tests**: 39
 
 ### Coverage Metrics
 ```
@@ -202,9 +229,11 @@ See [test/README.md](test/README.md) for detailed test documentation.
 - [x] Proportional deleveraging mechanism
 - [x] Performance fees with HWM
 - [x] Emergency mode circuit breaker
-- [x] Comprehensive test suite (135 tests, 93.72% coverage)
-- [ ] Multi-asset loop strategies
-- [ ] Automatic health factor management
+- [x] Automatic health factor management with emergency divest
+- [x] Automatic recovery and reinvestment system
+- [x] Optimized withdrawals during emergency mode
+- [x] Comprehensive test suite (139 tests, 93.72% coverage)
+- [ ] Additional strategies
 - [ ] Gas optimizations
 - [ ] Security audit
 - [ ] Mainnet deployment

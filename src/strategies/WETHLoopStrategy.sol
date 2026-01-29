@@ -2,6 +2,7 @@
 pragma solidity 0.8.26;
 
 import {BaseStrategy} from "../base/BaseStrategy.sol";
+import {BaseVault} from "../base/BaseVault.sol";
 import {UniswapV4Adapter} from "../adapters/UniswapV4Adapter.sol";
 import {AaveAdapter} from "../adapters/AaveAdapter.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -52,6 +53,7 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
     error InsufficientEquity();
     error WithdrawExceedsEquity(uint256 requested, uint256 available);
     error InsufficientBalanceForFlashRepayment(uint256 balance, uint256 required);
+    error EmergencyDivestFailed();
 
     /*//////////////////////////////////////////////////////////////
                                CONSTRUCTOR
@@ -215,9 +217,53 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
      */
     function harvest() external view override onlyVaultAdmin {}
 
-    function checkHealth() external view override returns (bool) {
+    /**
+     * @notice Checks strategy health and triggers emergency divest if needed.
+     * @dev If healthFactor < minHealthFactor:
+     *      1. Divests entire position to close leverage
+     *      2. Activates emergency mode on vault to block new deposits
+     *      3. Returns false to signal health check failure
+     * @return healthy True if health factor is acceptable, false otherwise.
+     */
+    function checkHealth() external override returns (bool healthy) {
+        // Checks
         (,,,,, uint256 healthFactor) = IPool(aavePool).getUserAccountData(address(this));
-        return healthFactor >= minHealthFactor;
+
+        if (healthFactor >= minHealthFactor) {
+            return true;
+        }
+
+        // Effects & Interactions: Emergency divest and activate emergency mode
+        _emergencyDivest();
+
+        return false;
+    }
+
+    /**
+     * @dev Emergency divest: closes entire leveraged position and activates vault emergency mode.
+     */
+    function _emergencyDivest() internal {
+        // Effects: Activate emergency mode on vault first
+        BaseVault(vault).activateEmergencyMode();
+
+        // Checks
+        uint256 totalCollateral = IERC20(aToken).balanceOf(address(this));
+        uint256 totalDebt = IERC20(variableDebtToken).balanceOf(address(this));
+
+        if (totalCollateral == 0) return;
+
+        // Interactions
+        if (totalDebt > 0) {
+            // Use flash loan to close entire position
+            flashLoan(Currency.wrap(address(asset())), totalDebt, abi.encode(true, totalCollateral));
+        } else {
+            // No debt, just withdraw all collateral
+            AaveAdapter.withdraw(aavePool, address(asset()), totalCollateral);
+        }
+
+        // Invariants: Verify position is closed
+        uint256 remainingDebt = IERC20(variableDebtToken).balanceOf(address(this));
+        if (remainingDebt > 0) revert EmergencyDivestFailed();
     }
 
     /**

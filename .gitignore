@@ -11,6 +11,7 @@ artifacts/
 
 # Docs
 docs/
+github-description.md
 
 # Dotenv file
 .env
@@ -20,6 +21,7 @@ docs/
 # Editor configs
 .vscode/
 .agent/
+.claude/
 .idea/
 *.swp
 *.local.*

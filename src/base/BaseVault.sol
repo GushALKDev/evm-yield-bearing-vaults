@@ -64,6 +64,7 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
     error InvalidAdmin();
     error ProtocolFeeTooHigh();
     error InvalidRecipient();
+    error NotStrategy();
 
     /*//////////////////////////////////////////////////////////////
                                CONSTRUCTOR
@@ -104,6 +105,11 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
         _;
     }
 
+    modifier onlyStrategy() {
+        if (msg.sender != address(strategy)) revert NotStrategy();
+        _;
+    }
+
     /*//////////////////////////////////////////////////////////////
                            ADMIN FUNCTIONS
     //////////////////////////////////////////////////////////////*/
@@ -126,12 +132,24 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
     /**
      * @dev Deposits are blocked but withdrawals remain active.
      */
-    function setEmergencyMode(bool _isOpen) external onlyAdmin {
-        emergencyMode = _isOpen;
+    function setEmergencyMode(bool _active) external onlyAdmin {
+        emergencyMode = _active;
         if (address(strategy) != address(0)) {
-            strategy.setEmergencyMode(_isOpen);
+            strategy.setEmergencyMode(_active);
         }
-        emit EmergencyModeSet(_isOpen);
+        emit EmergencyModeSet(_active);
+    }
+
+    /**
+     * @notice Allows strategy to activate emergency mode when health check fails.
+     * @dev Only callable by the strategy contract. Cannot deactivate emergency mode.
+     */
+    function activateEmergencyMode() external onlyStrategy {
+        emergencyMode = true;
+        if (address(strategy) != address(0)) {
+            strategy.setEmergencyMode(true);
+        }
+        emit EmergencyModeSet(true);
     }
 
     function setProtocolFee(uint16 _newFeeBps) external onlyAdmin {

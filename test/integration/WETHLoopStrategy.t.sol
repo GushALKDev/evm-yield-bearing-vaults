@@ -482,4 +482,276 @@ contract WETHLoopStrategyTest is Test {
             assertApproxEqAbs(user2ExpectedAssets, user2Deposit, 0.002 ether, "User2 should still have their deposit value");
         }
     }
+
+    /**
+     * @notice Tests automatic emergency divest when health factor drops below minimum.
+     * @dev Verifies:
+     *      - checkHealth() detects unhealthy position
+     *      - Entire position is divested automatically
+     *      - Emergency mode is activated on vault
+     *      - Debt is fully repaid
+     *      - Assets remain in strategy as collateral
+     *
+     *      Since manipulating health factor in a fork test is complex, we use a workaround:
+     *      We increase minHealthFactor to be higher than the current health factor, simulating
+     *      a situation where the position becomes unhealthy relative to risk parameters.
+     */
+    function test_CheckHealth_TriggersEmergencyDivest() public {
+        // ============ ARRANGE ============
+        uint256 depositAmount = 1 ether;
+
+        // Deposit to create leveraged position
+        vm.startPrank(vault);
+        weth.approve(address(strategy), depositAmount);
+        strategy.deposit(depositAmount, vault);
+        vm.stopPrank();
+
+        // Get initial health factor
+        (,,,,, uint256 initialHealthFactor) = IPool(resolvedPool).getUserAccountData(address(strategy));
+        console.log("=== Initial State ===");
+        console.log("Initial Health Factor:", initialHealthFactor);
+        assertGe(initialHealthFactor, MIN_HEALTH_FACTOR, "Should start healthy");
+
+        // Get initial position
+        uint256 initialCollateral = IERC20(AWETH_TOKEN).balanceOf(address(strategy));
+        uint256 initialDebt = IERC20(VARIABLE_DEBT_WETH).balanceOf(address(strategy));
+        console.log("Initial Collateral (WETH):", initialCollateral);
+        console.log("Initial Debt (WETH):", initialDebt);
+
+        // ============ ACT: INCREASE MIN_HEALTH_FACTOR ============
+        // Simulate unhealthy position by raising minHealthFactor above current healthFactor
+        // Current HF is ~1.055, so we set minimum to 1.1 (higher than current)
+        uint256 newMinHealthFactor = initialHealthFactor + 0.05e18; // Slightly above current
+
+        vm.prank(vaultAdmin);
+        strategy.setHealthFactors(newMinHealthFactor, newMinHealthFactor + 0.03e18);
+
+        console.log("\n=== After Health Factor Update ===");
+        console.log("New Min Health Factor:", newMinHealthFactor);
+
+        // ============ ACT: TRIGGER CHECKHEALTH ============
+        bool isHealthy = strategy.checkHealth();
+
+        // ============ ASSERT: CHECKHEALTH RETURNED FALSE ============
+        assertFalse(isHealthy, "checkHealth should return false for unhealthy position");
+
+        // ============ ASSERT: EMERGENCY MODE ACTIVATED ============
+        assertTrue(YieldBearingVault(vault).emergencyMode(), "Vault emergency mode should be active");
+        assertTrue(strategy.emergencyMode(), "Strategy emergency mode should be active");
+
+        // ============ ASSERT: POSITION CLOSED ============
+        uint256 finalCollateral = IERC20(AWETH_TOKEN).balanceOf(address(strategy));
+        uint256 finalDebt = IERC20(VARIABLE_DEBT_WETH).balanceOf(address(strategy));
+
+        console.log("\n=== After Emergency Divest ===");
+        console.log("Final Collateral (WETH):", finalCollateral);
+        console.log("Final Debt (WETH):", finalDebt);
+
+        // Debt should be fully repaid (allow small dust)
+        assertLt(finalDebt, 100, "Debt should be fully repaid");
+
+        // Collateral should be minimal (withdrawn to strategy)
+        assertLt(finalCollateral, 100, "Collateral should be minimal");
+
+        // The assets should be sitting in the strategy now
+        uint256 strategyWethBalance = weth.balanceOf(address(strategy));
+        console.log("Strategy WETH Balance:", strategyWethBalance);
+        assertGt(strategyWethBalance, 0, "Strategy should hold withdrawn assets");
+
+        // Should be close to original deposit amount (minus some small losses from rounding)
+        assertApproxEqAbs(strategyWethBalance, depositAmount, 0.001 ether, "Should recover most of deposit");
+
+        // ============ ASSERT: NEW DEPOSITS BLOCKED ============
+        // Try to deposit - should revert
+        vm.startPrank(vault);
+        weth.approve(address(strategy), 1 ether);
+        vm.expectRevert();
+        strategy.deposit(1 ether, vault);
+        vm.stopPrank();
+    }
+
+    /**
+     * @notice Tests that checkHealth returns true when position is healthy.
+     * @dev Verifies normal operation doesn't trigger emergency.
+     */
+    function test_CheckHealth_HealthyPosition() public {
+        // ============ ARRANGE ============
+        uint256 depositAmount = 1 ether;
+
+        // Deposit to create leveraged position
+        vm.startPrank(vault);
+        weth.approve(address(strategy), depositAmount);
+        strategy.deposit(depositAmount, vault);
+        vm.stopPrank();
+
+        // ============ ACT ============
+        bool isHealthy = strategy.checkHealth();
+
+        // ============ ASSERT ============
+        assertTrue(isHealthy, "checkHealth should return true for healthy position");
+        assertFalse(YieldBearingVault(vault).emergencyMode(), "Emergency mode should not be active");
+        assertFalse(strategy.emergencyMode(), "Strategy emergency mode should not be active");
+
+        // Verify position still exists
+        (uint256 collateral, uint256 debt,,,,) = IPool(resolvedPool).getUserAccountData(address(strategy));
+        assertGt(collateral, 0, "Should still have collateral");
+        assertGt(debt, 0, "Should still have debt");
+    }
+
+    /**
+     * @notice Tests that withdrawals work correctly in emergency mode without attempting divest.
+     * @dev Verifies:
+     *      - Users can withdraw after emergency mode activation
+     *      - Withdrawals don't attempt to divest (position already closed)
+     *      - Users receive their funds from the strategy's WETH balance
+     */
+    function test_EmergencyMode_WithdrawalsSkipDivest() public {
+        // ============ ARRANGE ============
+        address user = makeAddr("user");
+        uint256 depositAmount = 1 ether;
+
+        // Whitelist and fund user
+        vm.prank(vaultOwner);
+        YieldBearingVault(vault).addToWhitelist(user);
+        deal(address(weth), user, depositAmount);
+
+        // User deposits
+        vm.startPrank(user);
+        weth.approve(vault, depositAmount);
+        uint256 shares = YieldBearingVault(vault).deposit(depositAmount, user);
+        vm.stopPrank();
+
+        // Verify initial position
+        (,,,,, uint256 initialHealthFactor) = IPool(resolvedPool).getUserAccountData(address(strategy));
+        console.log("=== Before Emergency ===");
+        console.log("Initial Health Factor:", initialHealthFactor);
+        console.log("User Shares:", shares);
+
+        // ============ ACT: TRIGGER EMERGENCY MODE ============
+        // Increase minHealthFactor to trigger emergency
+        uint256 newMinHealthFactor = initialHealthFactor + 0.05e18;
+        vm.prank(vaultAdmin);
+        strategy.setHealthFactors(newMinHealthFactor, newMinHealthFactor + 0.03e18);
+
+        // Trigger checkHealth to activate emergency mode
+        strategy.checkHealth();
+
+        // Verify emergency mode is active
+        assertTrue(YieldBearingVault(vault).emergencyMode(), "Vault emergency mode should be active");
+        assertTrue(strategy.emergencyMode(), "Strategy emergency mode should be active");
+
+        // Verify position is closed
+        uint256 strategyWethBalance = weth.balanceOf(address(strategy));
+        console.log("\n=== After Emergency ===");
+        console.log("Strategy WETH Balance:", strategyWethBalance);
+        assertGt(strategyWethBalance, 0, "Strategy should hold divested assets");
+
+        // ============ ACT: USER WITHDRAWS ============
+        uint256 userBalanceBefore = weth.balanceOf(user);
+
+        vm.prank(user);
+        uint256 assetsReceived = YieldBearingVault(vault).redeem(shares, user, user);
+
+        uint256 userBalanceAfter = weth.balanceOf(user);
+        uint256 actualReceived = userBalanceAfter - userBalanceBefore;
+
+        console.log("\n=== After User Withdrawal ===");
+        console.log("Assets Received:", assetsReceived);
+        console.log("Actual Received:", actualReceived);
+
+        // ============ ASSERT: USER RECEIVED FUNDS ============
+        assertGt(actualReceived, 0, "User should receive funds");
+        // Allow up to 2% loss due to flash loan costs and rounding in emergency divest
+        assertApproxEqAbs(actualReceived, depositAmount, 0.02 ether, "User should receive close to deposit amount");
+
+        // Verify no more debt (position wasn't re-opened)
+        uint256 finalDebt = IERC20(VARIABLE_DEBT_WETH).balanceOf(address(strategy));
+        assertEq(finalDebt, 0, "Debt should remain at zero");
+    }
+
+    /**
+     * @notice Tests recovery from emergency mode by reinvesting all funds.
+     * @dev Verifies:
+     *      - Admin can deactivate emergency mode
+     *      - Funds are automatically reinvested when emergency mode is deactivated
+     *      - Position is restored with proper leverage
+     *      - New deposits are allowed again
+     */
+    function test_RecoveryFromEmergency_ReinvestsAutomatically() public {
+        // ============ ARRANGE ============
+        address user = makeAddr("user");
+        uint256 depositAmount = 1 ether;
+
+        // Whitelist and fund user
+        vm.prank(vaultOwner);
+        YieldBearingVault(vault).addToWhitelist(user);
+        deal(address(weth), user, depositAmount * 2);
+
+        // User deposits
+        vm.startPrank(user);
+        weth.approve(vault, depositAmount);
+        YieldBearingVault(vault).deposit(depositAmount, user);
+        vm.stopPrank();
+
+        // Trigger emergency mode
+        (,,,,, uint256 initialHealthFactor) = IPool(resolvedPool).getUserAccountData(address(strategy));
+        uint256 newMinHealthFactor = initialHealthFactor + 0.05e18;
+        vm.prank(vaultAdmin);
+        strategy.setHealthFactors(newMinHealthFactor, newMinHealthFactor + 0.03e18);
+        strategy.checkHealth();
+
+        // Verify emergency mode is active
+        assertTrue(YieldBearingVault(vault).emergencyMode(), "Emergency mode should be active");
+        assertTrue(strategy.emergencyMode(), "Strategy emergency mode should be active");
+
+        uint256 strategyBalanceBeforeRecovery = weth.balanceOf(address(strategy));
+        console.log("=== Before Recovery ===");
+        console.log("Strategy WETH Balance:", strategyBalanceBeforeRecovery);
+        assertGt(strategyBalanceBeforeRecovery, 0, "Strategy should hold divested assets");
+
+        // Verify position is closed
+        uint256 debtBeforeRecovery = IERC20(VARIABLE_DEBT_WETH).balanceOf(address(strategy));
+        assertEq(debtBeforeRecovery, 0, "Debt should be zero during emergency");
+
+        // ============ ACT: ADMIN DEACTIVATES EMERGENCY MODE ============
+        vm.prank(vaultAdmin);
+        YieldBearingVault(vault).setEmergencyMode(false);
+
+        // ============ ASSERT: EMERGENCY MODE DEACTIVATED ============
+        assertFalse(YieldBearingVault(vault).emergencyMode(), "Vault emergency mode should be deactivated");
+        assertFalse(strategy.emergencyMode(), "Strategy emergency mode should be deactivated");
+
+        // ============ ASSERT: FUNDS REINVESTED ============
+        uint256 strategyBalanceAfterRecovery = weth.balanceOf(address(strategy));
+        uint256 collateralAfterRecovery = IERC20(AWETH_TOKEN).balanceOf(address(strategy));
+        uint256 debtAfterRecovery = IERC20(VARIABLE_DEBT_WETH).balanceOf(address(strategy));
+
+        console.log("\n=== After Recovery ===");
+        console.log("Strategy WETH Balance:", strategyBalanceAfterRecovery);
+        console.log("Collateral (aWETH):", collateralAfterRecovery);
+        console.log("Debt (WETH):", debtAfterRecovery);
+
+        // Strategy balance should be minimal (all invested)
+        assertLt(strategyBalanceAfterRecovery, 100, "Strategy balance should be minimal after reinvest");
+
+        // Position should be re-established
+        assertGt(collateralAfterRecovery, 0, "Should have collateral after recovery");
+        assertGt(debtAfterRecovery, 0, "Should have debt after recovery");
+
+        // Verify leverage is restored
+        (,,,,, uint256 healthFactorAfterRecovery) = IPool(resolvedPool).getUserAccountData(address(strategy));
+        console.log("Health Factor After Recovery:", healthFactorAfterRecovery);
+        assertGe(healthFactorAfterRecovery, MIN_HEALTH_FACTOR, "Health factor should be healthy");
+
+        // ============ ASSERT: NEW DEPOSITS ALLOWED ============
+        vm.startPrank(user);
+        weth.approve(vault, depositAmount);
+        YieldBearingVault(vault).deposit(depositAmount, user);
+        vm.stopPrank();
+
+        console.log("\n=== After New Deposit ===");
+        uint256 finalCollateral = IERC20(AWETH_TOKEN).balanceOf(address(strategy));
+        console.log("Final Collateral:", finalCollateral);
+        assertGt(finalCollateral, collateralAfterRecovery, "New deposit should increase collateral");
+    }
 }
