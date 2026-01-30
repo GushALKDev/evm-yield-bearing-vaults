@@ -27,6 +27,8 @@ github-description.md
 *.local.*
 *.DS_Store
 .history/
+slither.*
+aderyn-*
 
 # Node modules
 node_modules/

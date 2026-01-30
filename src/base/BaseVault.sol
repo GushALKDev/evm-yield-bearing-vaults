@@ -65,6 +65,9 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
     error ProtocolFeeTooHigh();
     error InvalidRecipient();
     error NotStrategy();
+    error InvalidStrategy();
+    error InsufficientStrategyShares(uint256 actual, uint256 expected);
+    error InsufficientStrategySharesBurned(uint256 actual, uint256 expected);
 
     /*//////////////////////////////////////////////////////////////
                                CONSTRUCTOR
@@ -81,6 +84,7 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
         address _admin,
         uint256 _initialDeposit
     ) ERC4626(_asset) ERC20(_name, _symbol) Whitelist(_owner) {
+        if (_admin == address(0)) revert InvalidAdmin();
         admin = _admin;
 
         if (_initialDeposit != REQUIRED_INITIAL_DEPOSIT) revert IncorrectInitialDeposit(_initialDeposit);
@@ -136,8 +140,9 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
      * @dev Warning: Ensure funds from old strategy are migrated first.
      */
     function setStrategy(BaseStrategy _strategy) external onlyAdmin {
+        if (address(_strategy) == address(0)) revert InvalidStrategy();
         strategy = _strategy;
-        IERC20(asset()).approve(address(_strategy), type(uint256).max);
+        SafeERC20.forceApprove(IERC20(asset()), address(_strategy), type(uint256).max);
         emit StrategySet(address(_strategy));
     }
 
@@ -228,7 +233,9 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
         highWaterMark += assets;
 
         if (address(strategy) != address(0)) {
-            strategy.deposit(assets, address(this));
+            uint256 expectedShares = strategy.previewDeposit(assets);
+            uint256 actualShares = strategy.deposit(assets, address(this));
+            if (actualShares < expectedShares) revert InsufficientStrategyShares(actualShares, expectedShares);
         }
     }
 
@@ -243,7 +250,9 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
         if (localBalance < assets) {
             if (address(strategy) != address(0)) {
                 uint256 shortage = assets - localBalance;
-                strategy.withdraw(shortage, address(this), address(this));
+                uint256 expectedShares = strategy.previewWithdraw(shortage);
+                uint256 actualShares = strategy.withdraw(shortage, address(this), address(this));
+                if (actualShares > expectedShares) revert InsufficientStrategySharesBurned(actualShares, expectedShares);
             }
         }
 

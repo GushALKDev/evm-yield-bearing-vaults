@@ -28,6 +28,7 @@ contract AaveSimpleLendingStrategy is BaseStrategy {
     //////////////////////////////////////////////////////////////*/
 
     error StrategyNotHarvestable();
+    error InsufficientAaveWithdrawal(uint256 withdrawn, uint256 requested);
 
     /*//////////////////////////////////////////////////////////////
                               CONSTRUCTOR
@@ -49,7 +50,8 @@ contract AaveSimpleLendingStrategy is BaseStrategy {
     }
 
     function _divest(uint256 assets) internal override {
-        AaveAdapter.withdraw(AAVE_POOL, address(asset()), assets);
+        uint256 withdrawn = AaveAdapter.withdraw(AAVE_POOL, address(asset()), assets);
+        if (withdrawn < assets) revert InsufficientAaveWithdrawal(withdrawn, assets);
     }
 
     /**

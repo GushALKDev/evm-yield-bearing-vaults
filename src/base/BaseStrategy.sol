@@ -30,6 +30,8 @@ abstract contract BaseStrategy is ERC4626 {
     //////////////////////////////////////////////////////////////*/
 
     event EmergencyModeSet(bool isOpen);
+    event LeverageSet(uint8 newLeverage);
+    event HealthFactorsSet(uint256 minHealth, uint256 targetHealth);
 
     /*//////////////////////////////////////////////////////////////
                                  ERRORS

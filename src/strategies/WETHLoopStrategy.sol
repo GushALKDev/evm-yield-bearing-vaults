@@ -47,13 +47,15 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
     //////////////////////////////////////////////////////////////*/
 
     error InvalidLeverage();
-    error HealthFactorTooLow(uint256 current, uint256 min);
     error InvalidHealthFactors();
     error BorrowedAmountMismatch(uint256 borrowed, uint256 expected);
     error InsufficientEquity();
     error WithdrawExceedsEquity(uint256 requested, uint256 available);
     error InsufficientBalanceForFlashRepayment(uint256 balance, uint256 required);
     error EmergencyDivestFailed();
+    error InsufficientAaveWithdrawal(uint256 withdrawn, uint256 requested);
+    error InsufficientAaveRepayment(uint256 repaid, uint256 requested);
+    error StrategyNotHarvestable();
 
     /*//////////////////////////////////////////////////////////////
                                CONSTRUCTOR
@@ -106,12 +108,14 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
     function setLeverage(uint8 _targetLeverage) external onlyVaultAdmin {
         if (_targetLeverage < 2) revert InvalidLeverage();
         targetLeverage = _targetLeverage;
+        emit LeverageSet(_targetLeverage);
     }
 
     function setHealthFactors(uint256 _min, uint256 _target) external onlyVaultAdmin {
         if (_min >= _target) revert InvalidHealthFactors();
         minHealthFactor = _min;
         targetHealthFactor = _target;
+        emit HealthFactorsSet(_min, _target);
     }
 
     function _enableEMode(uint8 categoryId) internal {
@@ -146,23 +150,28 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
         uint256 totalCollateral = IERC20(A_TOKEN).balanceOf(address(this));
         uint256 totalDebt = IERC20(VARIABLE_DEBT_TOKEN).balanceOf(address(this));
 
+        //slither-disable-next-line incorrect-equality
+        // Legitimate check: ERC20 balance can be exactly zero (empty position)
         if (totalCollateral == 0) return;
 
+        //slither-disable-next-line incorrect-equality
+        // Legitimate check: no debt means no leverage, simple withdrawal
         if (totalDebt == 0) {
-            AaveAdapter.withdraw(AAVE_POOL, address(asset()), assets);
+            uint256 withdrawn = AaveAdapter.withdraw(AAVE_POOL, address(asset()), assets);
+            if (withdrawn < assets) revert InsufficientAaveWithdrawal(withdrawn, assets);
             return;
         }
 
         uint256 netEquity = totalCollateral - totalDebt;
+        //slither-disable-next-line incorrect-equality
+        // Legitimate check: prevents division by zero in proportional calculations
         if (netEquity == 0) revert InsufficientEquity();
-
-        // Calculate proportional amounts to maintain leverage ratio
-        uint256 withdrawRatio = (assets * 1e18) / netEquity;
-        if (withdrawRatio > 1e18) revert WithdrawExceedsEquity(assets, netEquity);
+        if (assets > netEquity) revert WithdrawExceedsEquity(assets, netEquity);
 
         // Effects
-        uint256 debtToRepay = (totalDebt * withdrawRatio) / 1e18;
-        uint256 collateralToWithdraw = (totalCollateral * withdrawRatio) / 1e18;
+        // Calculate proportional amounts directly to avoid precision loss
+        uint256 debtToRepay = (totalDebt * assets) / netEquity;
+        uint256 collateralToWithdraw = (totalCollateral * assets) / netEquity;
 
         // Interactions
         flashLoan(Currency.wrap(address(asset())), debtToRepay, abi.encode(true, collateralToWithdraw));
@@ -204,8 +213,11 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
      */
     function _onFlashLoanDivest(address underlying, uint256 flashAmount, uint256 collateralToWithdraw) internal {
         // Interactions
-        AaveAdapter.repay(AAVE_POOL, underlying, flashAmount);
-        AaveAdapter.withdraw(AAVE_POOL, underlying, collateralToWithdraw);
+        uint256 repaid = AaveAdapter.repay(AAVE_POOL, underlying, flashAmount);
+        if (repaid < flashAmount) revert InsufficientAaveRepayment(repaid, flashAmount);
+
+        uint256 withdrawn = AaveAdapter.withdraw(AAVE_POOL, underlying, collateralToWithdraw);
+        if (withdrawn < collateralToWithdraw) revert InsufficientAaveWithdrawal(withdrawn, collateralToWithdraw);
 
         // Invariants
         uint256 balance = IERC20(underlying).balanceOf(address(this));
@@ -215,7 +227,9 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
     /**
      * @dev Aave supply yields auto-compound via aToken rebasing.
      */
-    function harvest() external view override onlyVaultAdmin {}
+    function harvest() external view override onlyVaultAdmin {
+        revert StrategyNotHarvestable();
+    }
 
     /**
      * @notice Checks strategy health and triggers emergency divest if needed.
@@ -227,6 +241,8 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
      */
     function checkHealth() external override returns (bool healthy) {
         // Checks
+        //slither-disable-next-line unused-return
+        // Other return values (collateral, debt, etc.) not needed for health check
         (,,,,, uint256 healthFactor) = IPool(AAVE_POOL).getUserAccountData(address(this));
 
         if (healthFactor >= minHealthFactor) {
@@ -250,6 +266,8 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
         uint256 totalCollateral = IERC20(A_TOKEN).balanceOf(address(this));
         uint256 totalDebt = IERC20(VARIABLE_DEBT_TOKEN).balanceOf(address(this));
 
+        //slither-disable-next-line incorrect-equality
+        // Legitimate check: ERC20 balance can be exactly zero (empty position)
         if (totalCollateral == 0) return;
 
         // Interactions
@@ -258,7 +276,8 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
             flashLoan(Currency.wrap(address(asset())), totalDebt, abi.encode(true, totalCollateral));
         } else {
             // No debt, just withdraw all collateral
-            AaveAdapter.withdraw(AAVE_POOL, address(asset()), totalCollateral);
+            uint256 withdrawn = AaveAdapter.withdraw(AAVE_POOL, address(asset()), totalCollateral);
+            if (withdrawn < totalCollateral) revert InsufficientAaveWithdrawal(withdrawn, totalCollateral);
         }
 
         // Invariants: Verify position is closed

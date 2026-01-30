@@ -146,7 +146,9 @@ contract AaveSimpleStrategyForkTest is Test {
         // ============ ASSERT: SHARE OWNERSHIP INVARIANTS ============
         // Vault shares = Alice + Dead
         assertEq(
-            vault.totalSupply(), vault.balanceOf(alice) + vault.balanceOf(DEAD_ADDRESS), "Vault Total Supply Invariant"
+            vault.totalSupply(),
+            vault.balanceOf(alice) + vault.balanceOf(DEAD_ADDRESS),
+            "Vault Total Supply Invariant"
         );
         // Strategy shares = Vault's holdings
         assertEq(strategy.totalSupply(), strategy.balanceOf(address(vault)), "Strategy Total Supply Invariant");
@@ -214,7 +216,9 @@ contract AaveSimpleStrategyForkTest is Test {
         assertEq(usdc.balanceOf(address(strategy)), 0, "Strategy should hold 0 underlying");
 
         assertEq(
-            vault.totalSupply(), vault.balanceOf(alice) + vault.balanceOf(DEAD_ADDRESS), "Vault Total Supply Invariant"
+            vault.totalSupply(),
+            vault.balanceOf(alice) + vault.balanceOf(DEAD_ADDRESS),
+            "Vault Total Supply Invariant"
         );
         assertEq(strategy.totalSupply(), strategy.balanceOf(address(vault)), "Strategy Total Supply Invariant");
 
@@ -279,7 +283,9 @@ contract AaveSimpleStrategyForkTest is Test {
         assertEq(usdc.balanceOf(address(strategy)), 0, "Strategy should hold 0 underlying");
 
         assertEq(
-            vault.totalSupply(), vault.balanceOf(alice) + vault.balanceOf(DEAD_ADDRESS), "Vault Total Supply Invariant"
+            vault.totalSupply(),
+            vault.balanceOf(alice) + vault.balanceOf(DEAD_ADDRESS),
+            "Vault Total Supply Invariant"
         );
         assertEq(strategy.totalSupply(), strategy.balanceOf(address(vault)), "Strategy Total Supply Invariant");
 

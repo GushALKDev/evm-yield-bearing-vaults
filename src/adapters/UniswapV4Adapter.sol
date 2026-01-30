@@ -27,6 +27,7 @@ abstract contract UniswapV4Adapter is IUnlockCallback {
     //////////////////////////////////////////////////////////////*/
 
     error CallbackUnauthorized();
+    error FlashLoanRepaymentFailed(uint256 paid, uint256 expected);
 
     /*//////////////////////////////////////////////////////////////
                               CONSTRUCTOR
@@ -44,6 +45,8 @@ abstract contract UniswapV4Adapter is IUnlockCallback {
      * @dev Borrowed funds must be repaid within the same transaction.
      */
     function flashLoan(Currency currency, uint256 amount, bytes memory data) internal {
+        //slither-disable-next-line unused-return
+        // Return value intentionally ignored per Uniswap V4 design pattern
         POOL_MANAGER.unlock(abi.encode(currency, amount, data));
     }
 
@@ -65,7 +68,8 @@ abstract contract UniswapV4Adapter is IUnlockCallback {
         // Repay flash loan
         POOL_MANAGER.sync(currency);
         IERC20(Currency.unwrap(currency)).safeTransfer(address(POOL_MANAGER), amount);
-        POOL_MANAGER.settle();
+        uint256 paid = POOL_MANAGER.settle();
+        if (paid != amount) revert FlashLoanRepaymentFailed(paid, amount);
 
         return "";
     }
