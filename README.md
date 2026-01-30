@@ -5,6 +5,10 @@
 ![Solidity](https://img.shields.io/badge/Solidity-0.8.26-blue)
 ![Foundry](https://img.shields.io/badge/Built%20with-Foundry-orange)
 
+![Tests](https://img.shields.io/badge/Tests-178%20%2F%20178-brightgreen)
+![Coverage](https://img.shields.io/badge/Coverage-93.72%25-brightgreen)
+![Fuzzing](https://img.shields.io/badge/Fuzzing-11%2C008%20iterations-blue)
+
 A modular ERC-4626 vault system with pluggable yield strategies, featuring leveraged looping via **zero-fee Uniswap V4 flash loans** and Aave V3 E-Mode.
 
 ## Status
@@ -181,12 +185,16 @@ forge test --gas-report
 
 ## Testing
 
-Comprehensive test suite with **139 tests** achieving **93.72% code coverage**.
+Comprehensive test suite with **178 tests** achieving **93.72% code coverage**.
 
 ### Test Statistics
-- **Total Tests**: 139 (100% pass rate)
-- **Unit Tests**: 100
-- **Integration Tests**: 39
+
+| Category | Tests | Iterations | Coverage |
+|----------|-------|------------|----------|
+| **Unit Tests** | 100 | - | Isolated components with mocks |
+| **Integration Tests** | 35 | - | Fork tests with real protocols |
+| **Fuzzing Tests** | 43 | 11,008 | Randomized inputs & invariants |
+| **Total** | **178** | **11,008+** | **100% pass rate** |
 
 ### Coverage Metrics
 ```
@@ -212,6 +220,12 @@ forge test --match-path "test/unit/*.sol"
 # Integration tests only
 forge test --match-path "test/integration/*.sol"
 
+# Fuzzing tests only
+forge test --match-path "test/fuzz/*.sol"
+
+# Fuzzing with more iterations (CI/audit)
+forge test --match-path "test/fuzz/*.sol" --fuzz-runs 1000
+
 # Coverage report
 forge coverage --no-match-coverage "(test|script|mock)"
 
@@ -219,7 +233,31 @@ forge coverage --no-match-coverage "(test|script|mock)"
 forge test --gas-report
 ```
 
-See [test/README.md](test/README.md) for detailed test documentation.
+### 🔀 Fuzzing Test Coverage
+
+**43 stateless fuzzing tests** with **256 runs each** (11,008 total iterations):
+
+| Test Suite | Tests | Focus Areas |
+|------------|-------|-------------|
+| **BaseVaultFuzz** | 15 | Deposits, withdrawals, fees, emergency mode, share conversions, invariants |
+| **WETHLoopStrategyFuzz** | 13 | Leverage (5x-10x), deleverage, health factors, emergency recovery, invariants |
+| **AaveSimpleStrategyFuzz** | 15 | Deposits, withdrawals, yield accrual (1-30 days), share conversions, invariants |
+
+**Input Ranges**: 1 wei → 1M tokens • 1-100% ratios • 1-30 days • 5x-10x leverage • 2-10 concurrent users
+
+**Invariants Verified**:
+- ✅ Total supply consistency (`totalSupply == userShares + deadShares`)
+- ✅ Vault-strategy asset matching (`vaultAssets == strategyAssets + buffer`)
+- ✅ Leverage bounds (`5x ≤ leverage ≤ 14x`)
+- ✅ Health factor thresholds (`healthFactor ≥ minHealthFactor`)
+
+### Documentation
+
+📖 **[Complete Test Suite Documentation](test/README.md)** - Detailed coverage breakdown:
+- [Unit Tests](test/README.md#unit-tests-coverage) (100 tests) - Vault admin, whitelist, access control, edge cases
+- [Integration Tests](test/README.md#integration-tests-coverage) (35 tests) - Fork tests with real Aave V3 and Uniswap V4
+- [Fuzzing Tests](test/README.md#fuzzing-tests-coverage) (43 tests) - Stateless fuzzing with randomized inputs
+- [Coverage Metrics](test/README.md#code-coverage) - Per-file coverage breakdown with targets
 
 ## Roadmap
 
@@ -232,11 +270,10 @@ See [test/README.md](test/README.md) for detailed test documentation.
 - [x] Automatic health factor management with emergency divest
 - [x] Automatic recovery and reinvestment system
 - [x] Optimized withdrawals during emergency mode
-- [x] Comprehensive test suite (139 tests, 93.72% coverage)
-- [ ] Additional strategies
+- [x] Comprehensive test suite (178 tests, 93.72% coverage)
+- [x] Stateless fuzzing tests (43 tests, 11k+ iterations)
 - [ ] Gas optimizations
-- [ ] Security audit
-- [ ] Mainnet deployment
+- [ ] Additional strategies
 
 ## License
 
