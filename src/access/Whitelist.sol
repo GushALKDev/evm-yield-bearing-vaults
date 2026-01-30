@@ -14,6 +14,7 @@ abstract contract Whitelist is Ownable {
     //////////////////////////////////////////////////////////////*/
 
     error NotWhitelisted(address account);
+    error EmptyArray();
 
     /*//////////////////////////////////////////////////////////////
                                  EVENTS
@@ -54,12 +55,46 @@ abstract contract Whitelist is Ownable {
     //////////////////////////////////////////////////////////////*/
 
     function addToWhitelist(address account) external onlyOwner {
+        // Skip if already whitelisted
+        if (isWhitelisted[account]) return;
         isWhitelisted[account] = true;
         emit WhitelistedAdded(account);
     }
 
     function removeFromWhitelist(address account) external onlyOwner {
+        // Skip if not whitelisted
+        if (!isWhitelisted[account]) return;
         isWhitelisted[account] = false;
         emit WhitelistedRemoved(account);
+    }
+
+    /// @notice Amortizes fixed tx costs (~23k per address) across batch
+    function addBatchToWhitelist(address[] calldata accounts) external onlyOwner {
+        uint256 length = accounts.length;
+        if (length == 0) revert EmptyArray();
+
+        for (uint256 i; i < length;) {
+            address account = accounts[i];
+            if (!isWhitelisted[account]) {
+                isWhitelisted[account] = true;
+                emit WhitelistedAdded(account);
+            }
+            unchecked { ++i; }
+        }
+    }
+
+    /// @notice Amortizes fixed tx costs (~23k per address) across batch
+    function removeBatchFromWhitelist(address[] calldata accounts) external onlyOwner {
+        uint256 length = accounts.length;
+        if (length == 0) revert EmptyArray();
+
+        for (uint256 i; i < length;) {
+            address account = accounts[i];
+            if (isWhitelisted[account]) {
+                isWhitelisted[account] = false;
+                emit WhitelistedRemoved(account);
+            }
+            unchecked { ++i; }
+        }
     }
 }

@@ -27,12 +27,14 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
                                 STORAGE
     //////////////////////////////////////////////////////////////*/
 
-    BaseStrategy public strategy;
-    bool public emergencyMode;
+    // Packed in single slot        // 23 bytes
+    BaseStrategy public strategy;   // 20 bytes
+    uint16 public protocolFeeBps;   // 2 bytes
+    bool public emergencyMode;      // 1 byte
+
     address public admin;
     address public feeRecipient;
 
-    uint16 public protocolFeeBps;
     uint16 constant MAX_BPS = 10_000;
     uint16 constant MAX_PROTOCOL_FEE_BPS = 2500;
 
@@ -151,8 +153,9 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
      */
     function setEmergencyMode(bool _active) external onlyAdmin {
         emergencyMode = _active;
-        if (address(strategy) != address(0)) {
-            strategy.setEmergencyMode(_active);
+        BaseStrategy cachedStrategy = strategy;
+        if (address(cachedStrategy) != address(0)) {
+            cachedStrategy.setEmergencyMode(_active);
         }
         emit EmergencyModeSet(_active);
     }
@@ -163,8 +166,9 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
      */
     function activateEmergencyMode() external onlyStrategy {
         emergencyMode = true;
-        if (address(strategy) != address(0)) {
-            strategy.setEmergencyMode(true);
+        BaseStrategy cachedStrategy = strategy;
+        if (address(cachedStrategy) != address(0)) {
+            cachedStrategy.setEmergencyMode(true);
         }
         emit EmergencyModeSet(true);
     }
@@ -209,8 +213,9 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
         uint256 localBalance = IERC20(asset()).balanceOf(address(this));
         uint256 strategyBalance = 0;
 
-        if (address(strategy) != address(0)) {
-            strategyBalance = strategy.convertToAssets(strategy.balanceOf(address(this)));
+        BaseStrategy cachedStrategy = strategy;
+        if (address(cachedStrategy) != address(0)) {
+            strategyBalance = cachedStrategy.convertToAssets(cachedStrategy.balanceOf(address(this)));
         }
 
         return localBalance + strategyBalance;
@@ -230,11 +235,15 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
 
         super._deposit(caller, receiver, assets, shares);
 
-        highWaterMark += assets;
+        // Gas: unchecked safe, overflow impossible (HWM bounded by total token supply << uint256.max)
+        unchecked {
+            highWaterMark += assets;
+        }
 
-        if (address(strategy) != address(0)) {
-            uint256 expectedShares = strategy.previewDeposit(assets);
-            uint256 actualShares = strategy.deposit(assets, address(this));
+        BaseStrategy cachedStrategy = strategy;
+        if (address(cachedStrategy) != address(0)) {
+            uint256 expectedShares = cachedStrategy.previewDeposit(assets);
+            uint256 actualShares = cachedStrategy.deposit(assets, address(this));
             if (actualShares < expectedShares) revert InsufficientStrategyShares(actualShares, expectedShares);
         }
     }
@@ -248,20 +257,25 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
         uint256 localBalance = IERC20(asset()).balanceOf(address(this));
 
         if (localBalance < assets) {
-            if (address(strategy) != address(0)) {
+            BaseStrategy cachedStrategy = strategy;
+            if (address(cachedStrategy) != address(0)) {
                 uint256 shortage = assets - localBalance;
-                uint256 expectedShares = strategy.previewWithdraw(shortage);
-                uint256 actualShares = strategy.withdraw(shortage, address(this), address(this));
+                uint256 expectedShares = cachedStrategy.previewWithdraw(shortage);
+                uint256 actualShares = cachedStrategy.withdraw(shortage, address(this), address(this));
                 if (actualShares > expectedShares) revert InsufficientStrategySharesBurned(actualShares, expectedShares);
             }
         }
 
         super._withdraw(caller, receiver, owner, assets, shares);
 
-        if (assets > highWaterMark) {
+        // Unchecked safe (already checked assets <= hwm)
+        uint256 hwm = highWaterMark;
+        if (assets > hwm) {
             highWaterMark = 0;
         } else {
-            highWaterMark -= assets;
+            unchecked {
+                highWaterMark = hwm - assets;
+            }
         }
     }
 
@@ -274,19 +288,27 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
      *      Fees are minted as new shares, diluting existing holders.
      */
     function _assessPerformanceFee() internal {
-        if (protocolFeeBps == 0 || feeRecipient == address(0)) return;
+        uint16 feeBps = protocolFeeBps;
+        address recipient = feeRecipient;
+
+        if (feeBps == 0 || recipient == address(0)) return;
 
         uint256 currentAssets = totalAssets();
+        uint256 hwm = highWaterMark;
 
-        if (currentAssets > highWaterMark) {
-            uint256 profit = currentAssets - highWaterMark;
-            uint256 feeInAssets = profit * protocolFeeBps / MAX_BPS;
+        if (currentAssets > hwm) {
+            // Unchecked safe (already checked currentAssets > hwm)
+            uint256 profit;
+            unchecked {
+                profit = currentAssets - hwm;
+            }
+            uint256 feeInAssets = profit * feeBps / MAX_BPS;
 
             if (feeInAssets > 0) {
                 uint256 feeShares = convertToShares(feeInAssets);
 
                 if (feeShares > 0) {
-                    _mint(feeRecipient, feeShares);
+                    _mint(recipient, feeShares);
                     emit PerformanceFeePaid(profit, feeShares);
                 }
             }

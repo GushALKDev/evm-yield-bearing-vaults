@@ -151,26 +151,20 @@ contract StrategyHealthCheckTest is Test {
     }
 
     /**
-     * @notice Tests harvest function on WETH strategy.
-     * @dev Harvest should be callable by vault admin.
+     * @notice Tests harvest function on WETH strategy reverts (Aave auto-compounds via aToken rebasing).
+     * @dev Harvest should revert with StrategyNotHarvestable to signal backend not to call periodically.
      */
-    function test_WETHStrategy_Harvest() public {
+    function test_WETHStrategy_Harvest_Reverts() public {
         // ============ ARRANGE: DEPOSIT ============
         vm.startPrank(alice);
         weth.approve(address(wethVault), DEPOSIT_AMOUNT);
         wethVault.deposit(DEPOSIT_AMOUNT, alice);
         vm.stopPrank();
 
-        uint256 totalAssetsBefore = wethStrategy.totalAssets();
-
-        // ============ ACT: CALL HARVEST AS VAULT ADMIN ============
+        // ============ ACT & ASSERT: HARVEST REVERTS ============
         vm.prank(vaultAdmin);
+        vm.expectRevert(abi.encodeWithSignature("StrategyNotHarvestable()"));
         wethStrategy.harvest();
-
-        // ============ ASSERT ============
-        // Harvest may not change assets immediately if no rewards
-        uint256 totalAssetsAfter = wethStrategy.totalAssets();
-        assertGe(totalAssetsAfter, totalAssetsBefore, "Assets should not decrease");
     }
 
     /**
@@ -296,8 +290,8 @@ contract StrategyHealthCheckTest is Test {
     }
 
     /**
-     * @notice Tests harvest behavior on both strategies.
-     * @dev WETH can harvest, USDC reverts (not harvestable).
+     * @notice Tests harvest behavior on both strategies (both use Aave, both auto-compound).
+     * @dev Both strategies revert with StrategyNotHarvestable since Aave auto-compounds via aToken rebasing.
      */
     function test_Strategies_HarvestBehavior() public {
         // ============ ARRANGE: DEPOSIT TO BOTH ============
@@ -309,15 +303,13 @@ contract StrategyHealthCheckTest is Test {
         usdcVault.deposit(USDC_DEPOSIT, alice);
         vm.stopPrank();
 
-        // ============ ACT: HARVEST WETH (SUCCEEDS) ============
+        // ============ ACT & ASSERT: BOTH HARVEST REVERT ============
         vm.prank(vaultAdmin);
+        vm.expectRevert(abi.encodeWithSignature("StrategyNotHarvestable()"));
         wethStrategy.harvest();
 
-        // ============ ACT & ASSERT: HARVEST USDC (REVERTS) ============
         vm.prank(vaultAdmin);
         vm.expectRevert(abi.encodeWithSignature("StrategyNotHarvestable()"));
         usdcStrategy.harvest();
-
-        assertTrue(true, "Harvest behaviors work as expected");
     }
 }

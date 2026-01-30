@@ -133,12 +133,18 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
      */
     function _invest(uint256 assets) internal override {
         uint256 principal = assets;
-        uint256 flashAmount = principal * (targetLeverage - 1);
+        // Gas: unchecked safe, overflow impossible (principal bounded by token supply, leverage max 255)
+        uint256 flashAmount;
+        unchecked {
+            flashAmount = principal * (targetLeverage - 1);
+        }
+
+        address assetAddr = asset();
 
         if (flashAmount > 0) {
-            flashLoan(Currency.wrap(address(asset())), flashAmount, bytes(""));
+            flashLoan(Currency.wrap(assetAddr), flashAmount, bytes(""));
         } else {
-            AaveAdapter.supply(AAVE_POOL, address(asset()), principal);
+            AaveAdapter.supply(AAVE_POOL, assetAddr, principal);
         }
     }
 
@@ -154,18 +160,25 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
         // Legitimate check: ERC20 balance can be exactly zero (empty position)
         if (totalCollateral == 0) return;
 
+        // Gas: cache asset to avoid repeated calls
+        address assetAddr = asset();
+
         //slither-disable-next-line incorrect-equality
         // Legitimate check: no debt means no leverage, simple withdrawal
         if (totalDebt == 0) {
-            uint256 withdrawn = AaveAdapter.withdraw(AAVE_POOL, address(asset()), assets);
+            uint256 withdrawn = AaveAdapter.withdraw(AAVE_POOL, assetAddr, assets);
             if (withdrawn < assets) revert InsufficientAaveWithdrawal(withdrawn, assets);
             return;
         }
 
-        uint256 netEquity = totalCollateral - totalDebt;
-        //slither-disable-next-line incorrect-equality
-        // Legitimate check: prevents division by zero in proportional calculations
-        if (netEquity == 0) revert InsufficientEquity();
+        // Position underwater or no equity (liquidation/interest accumulation)
+        if (totalCollateral <= totalDebt) revert InsufficientEquity();
+
+        // Gas: unchecked safe (totalCollateral > totalDebt validated above)
+        uint256 netEquity;
+        unchecked {
+            netEquity = totalCollateral - totalDebt;
+        }
         if (assets > netEquity) revert WithdrawExceedsEquity(assets, netEquity);
 
         // Effects
@@ -174,7 +187,7 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
         uint256 collateralToWithdraw = (totalCollateral * assets) / netEquity;
 
         // Interactions
-        flashLoan(Currency.wrap(address(asset())), debtToRepay, abi.encode(true, collateralToWithdraw));
+        flashLoan(Currency.wrap(assetAddr), debtToRepay, abi.encode(true, collateralToWithdraw));
     }
 
     /**
@@ -201,8 +214,9 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
         uint256 totalToSupply = IERC20(underlying).balanceOf(address(this));
 
         // Interactions
-        AaveAdapter.supply(AAVE_POOL, underlying, totalToSupply);
-        uint256 borrowed = AaveAdapter.borrow(AAVE_POOL, underlying, flashAmount);
+        address pool = AAVE_POOL;
+        AaveAdapter.supply(pool, underlying, totalToSupply);
+        uint256 borrowed = AaveAdapter.borrow(pool, underlying, flashAmount);
 
         // Invariants
         if (borrowed != flashAmount) revert BorrowedAmountMismatch(borrowed, flashAmount);
@@ -213,10 +227,11 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
      */
     function _onFlashLoanDivest(address underlying, uint256 flashAmount, uint256 collateralToWithdraw) internal {
         // Interactions
-        uint256 repaid = AaveAdapter.repay(AAVE_POOL, underlying, flashAmount);
+        address pool = AAVE_POOL;
+        uint256 repaid = AaveAdapter.repay(pool, underlying, flashAmount);
         if (repaid < flashAmount) revert InsufficientAaveRepayment(repaid, flashAmount);
 
-        uint256 withdrawn = AaveAdapter.withdraw(AAVE_POOL, underlying, collateralToWithdraw);
+        uint256 withdrawn = AaveAdapter.withdraw(pool, underlying, collateralToWithdraw);
         if (withdrawn < collateralToWithdraw) revert InsufficientAaveWithdrawal(withdrawn, collateralToWithdraw);
 
         // Invariants
@@ -271,12 +286,13 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
         if (totalCollateral == 0) return;
 
         // Interactions
+        address assetAddr = asset();
         if (totalDebt > 0) {
             // Use flash loan to close entire position
-            flashLoan(Currency.wrap(address(asset())), totalDebt, abi.encode(true, totalCollateral));
+            flashLoan(Currency.wrap(assetAddr), totalDebt, abi.encode(true, totalCollateral));
         } else {
             // No debt, just withdraw all collateral
-            uint256 withdrawn = AaveAdapter.withdraw(AAVE_POOL, address(asset()), totalCollateral);
+            uint256 withdrawn = AaveAdapter.withdraw(AAVE_POOL, assetAddr, totalCollateral);
             if (withdrawn < totalCollateral) revert InsufficientAaveWithdrawal(withdrawn, totalCollateral);
         }
 
@@ -294,6 +310,9 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
 
         if (totalCollateral <= totalDebt) return 0;
 
-        return totalCollateral - totalDebt;
+        // Gas: unchecked safe (already checked totalCollateral > totalDebt)
+        unchecked {
+            return totalCollateral - totalDebt;
+        }
     }
 }
