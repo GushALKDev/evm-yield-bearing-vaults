@@ -5,9 +5,9 @@
 ![Solidity](https://img.shields.io/badge/Solidity-0.8.26-blue)
 ![Foundry](https://img.shields.io/badge/Built%20with-Foundry-orange)
 
-![Tests](https://img.shields.io/badge/Tests-178%20%2F%20178-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-205%20%2F%20205-brightgreen)
 ![Coverage](https://img.shields.io/badge/Coverage-93.72%25-brightgreen)
-![Fuzzing](https://img.shields.io/badge/Fuzzing-11%2C008%20iterations-blue)
+![Fuzzing](https://img.shields.io/badge/Fuzzing-352%2C608%20iterations-blue)
 
 A modular ERC-4626 vault system with pluggable yield strategies, featuring leveraged looping via **zero-fee Uniswap V4 flash loans** and Aave V3 E-Mode.
 
@@ -26,6 +26,8 @@ A modular ERC-4626 vault system with pluggable yield strategies, featuring lever
 - **Defensive Security** - Critical protections including **Emergency Circuit Breakers** (pausing), **Reentrancy Guards**, and **Inflation Attack Prevention** (dead shares mechanism).
 
 - **Financial Integrity** - **High Water Mark** accounting ensures performance fees are only charged on net profits, preventing double taxation.
+
+- **Comprehensive Testing** - **27 stateful fuzzing invariant tests** using the handler pattern with ghost variable tracking. Supports **dual-mode execution**: mock mode (345,600 operations) for fast iteration, and fork mode for real protocol validation. Includes mock protocols (MockAavePool, MockPoolManager) to avoid RPC rate limiting.
 
 - **ERC-4626 Compliance** - Fully tokenized vault shares for maximum DeFi composability.
 
@@ -204,7 +206,7 @@ The contracts have been optimized for gas efficiency while maintaining code read
 
 ## Testing
 
-Comprehensive test suite with **178 tests** achieving **93.72% code coverage**.
+Comprehensive test suite with **205 tests** achieving **93.72% code coverage**.
 
 ### Test Statistics
 
@@ -212,8 +214,9 @@ Comprehensive test suite with **178 tests** achieving **93.72% code coverage**.
 |----------|-------|------------|----------|
 | **Unit Tests** | 100 | - | Isolated components with mocks |
 | **Integration Tests** | 35 | - | Fork tests with real protocols |
-| **Fuzzing Tests** | 43 | 11,008 | Randomized inputs & invariants |
-| **Total** | **178** | **11,008+** | **100% pass rate** |
+| **Stateless Fuzzing** | 43 | 11,008 | Randomized inputs & bounds testing |
+| **Stateful Fuzzing** | 27 | 341,600 | Invariant testing with sequences |
+| **Total** | **205** | **352,608+** | **100% pass rate** |
 
 ### Coverage Metrics
 ```
@@ -239,8 +242,14 @@ forge test --match-path "test/unit/*.sol"
 # Integration tests only
 forge test --match-path "test/integration/*.sol"
 
-# Fuzzing tests only
+# Stateless fuzzing tests only
 forge test --match-path "test/fuzz/*.sol"
+
+# Stateful fuzzing (invariant) tests - mock mode (default)
+forge test --match-path "test/invariant/*.sol"
+
+# Invariant tests in fork mode (real protocols)
+INVARIANT_USE_FORK=true FOUNDRY_PROFILE=fork-invariant forge test --match-path "test/invariant/*.sol"
 
 # Fuzzing with more iterations (CI/audit)
 forge test --match-path "test/fuzz/*.sol" --fuzz-runs 1000
@@ -252,7 +261,7 @@ forge coverage --no-match-coverage "(test|script|mock)"
 forge test --gas-report
 ```
 
-### 🔀 Fuzzing Test Coverage
+### 🔀 Stateless Fuzzing Test Coverage
 
 **43 stateless fuzzing tests** with **256 runs each** (11,008 total iterations):
 
@@ -264,18 +273,62 @@ forge test --gas-report
 
 **Input Ranges**: 1 wei → 1M tokens • 1-100% ratios • 1-30 days • 5x-10x leverage • 2-10 concurrent users
 
-**Invariants Verified**:
-- ✅ Total supply consistency (`totalSupply == userShares + deadShares`)
-- ✅ Vault-strategy asset matching (`vaultAssets == strategyAssets + buffer`)
-- ✅ Leverage bounds (`5x ≤ leverage ≤ 14x`)
-- ✅ Health factor thresholds (`healthFactor ≥ minHealthFactor`)
+### 🔄 Stateful Fuzzing Test Coverage (Invariant Testing with Handler Pattern)
+
+**27 stateful fuzzing invariant tests** using the **handler pattern** with **256 runs × 50 depth** (341,600 total function calls):
+
+| Test Suite | Tests | Focus Areas |
+|------------|-------|-------------|
+| **BaseVaultInvariant** | 9 | Supply consistency, dead shares, conversion reversibility, HWM, whitelist, emergency sync |
+| **WETHLoopStrategyInvariant** | 9 | Leverage bounds, health factor, total assets, emergency divest, position consistency |
+| **IntegratedInvariant** | 9 | System-wide invariants, vault-strategy consistency, no value leaks, emergency propagation |
+
+**Handler Contracts** (wrap protocol operations and track ghost variables):
+- `BaseVaultHandler` - Deposit, withdraw, transfer, assessFee operations
+- `WETHLoopStrategyHandler` - Strategy deposit/withdraw, health checks, time progression
+- `AdminHandler` - Whitelist management, fee changes, emergency mode toggling
+
+**Dual-Mode Execution**:
+- **Mock Mode (default)**: 256 runs × 50 depth (345,600 operations) using mock contracts
+- **Fork Mode**: 20 runs × 10 depth testing against real Aave V3 + Uniswap V4
+
+```bash
+# Mock mode (fast, default)
+forge test --match-path "test/invariant/*.sol"
+
+# Fork mode (real protocols)
+INVARIANT_USE_FORK=true FOUNDRY_PROFILE=fork-invariant forge test --match-path "test/invariant/*.sol"
+```
+
+**Mock Protocols** (avoid RPC rate limiting):
+- `MockAavePool` - Full Aave V3 Pool simulation with health factor calculation
+- `MockPoolManager` - Uniswap V4 flash loan manager
+- `MockWETH`, `MockAToken`, `MockVariableDebtToken` - Token simulations
+
+**Ghost Variables** (track expected state across operation sequences):
+- Vault: totalDeposited, totalWithdrawn, totalFeeMinted
+- Strategy: totalInvested, totalDivested, maxLeverage, emergencyDivestCount
+- Admin: whitelistAdditions, feeChanges, emergencyModeChanges
+
+**Key Invariants Verified**:
+- ✅ Total supply consistency (`totalSupply == userShares + deadShares + feeShares`)
+- ✅ Vault-strategy asset matching (`vaultAssets == strategyAssets`)
+- ✅ Leverage bounds (`leverage ≤ 14x` after operations)
+- ✅ Health factor safety (`healthFactor ≥ minHealthFactor` or emergency mode active)
+- ✅ Conversion reversibility (`convertToAssets(convertToShares(x)) ≈ x`)
+- ✅ Emergency mode synchronization (vault ↔ strategy bidirectional propagation)
+- ✅ No value leaks (total system value = sum of all positions)
+- ✅ High Water Mark bounds (`highWaterMark ≤ totalAssets()`)
+- ✅ Whitelist enforcement (only whitelisted addresses can hold shares)
+- ✅ Position value consistency (collateral - debt = equity after all operations)
 
 ### Documentation
 
 📖 **[Complete Test Suite Documentation](test/README.md)** - Detailed coverage breakdown:
 - [Unit Tests](test/README.md#unit-tests-coverage) (100 tests) - Vault admin, whitelist, access control, edge cases
 - [Integration Tests](test/README.md#integration-tests-coverage) (35 tests) - Fork tests with real Aave V3 and Uniswap V4
-- [Fuzzing Tests](test/README.md#fuzzing-tests-coverage) (43 tests) - Stateless fuzzing with randomized inputs
+- [Stateless Fuzzing](test/README.md#stateless-fuzzing-tests-coverage) (43 tests) - Randomized inputs and bounds testing
+- [Stateful Fuzzing](test/README.md#stateful-fuzzing-invariant-tests-coverage) (27 tests) - Invariant testing with operation sequences
 - [Coverage Metrics](test/README.md#code-coverage) - Per-file coverage breakdown with targets
 
 ## Roadmap
@@ -289,11 +342,12 @@ forge test --gas-report
 - [x] Automatic health factor management with emergency divest
 - [x] Automatic recovery and reinvestment system
 - [x] Optimized withdrawals during emergency mode
-- [x] Comprehensive test suite (178 tests, 93.72% coverage)
+- [x] Comprehensive test suite (205 tests, 93.72% coverage)
 - [x] Stateless fuzzing tests (43 tests, 11k+ iterations)
+- [x] Stateful fuzzing tests (27 invariant tests, 341k+ function calls)
 - [x] Gas optimizations (storage packing, caching, unchecked math)
-- [ ] Stateful fuzzing (invariant tests)
-- [ ] Additional strategies
+- [ ] Additional strategies (stETH, rETH, cbETH loops)
+- [ ] Multi-asset vaults
 
 ## License
 

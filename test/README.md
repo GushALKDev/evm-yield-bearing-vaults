@@ -2,15 +2,26 @@
 
 ## Overview
 
-This test suite provides comprehensive coverage for the Yield Bearing Vaults system, organized into **unit tests** (isolated contract testing with mocks) and **integration tests** (fork tests with real protocols).
+This test suite provides comprehensive coverage for the Yield Bearing Vaults system, featuring **27 stateful fuzzing invariant tests** using the handler pattern with ghost variable tracking. Tests are organized into unit tests (isolated components), integration tests (fork tests with real protocols), stateless fuzzing (randomized inputs), and stateful fuzzing (invariant testing with operation sequences).
 
 ## Test Statistics
 
-- **Total Tests**: 178
+- **Total Tests**: 205
 - **Unit Tests**: 100
 - **Integration Tests**: 35
-- **Fuzzing Tests**: 43
+- **Stateless Fuzzing**: 43
+- **Stateful Fuzzing (Invariant with Handlers)**: 27 ⭐
 - **Pass Rate**: 100%
+
+### 🌟 Highlighted: Stateful Fuzzing with Handler Pattern
+
+The test suite includes **27 stateful fuzzing invariant tests** that verify critical system invariants across **345,600 randomized operation sequences**:
+
+- **Handler Pattern**: Custom handler contracts (`BaseVaultHandler`, `WETHLoopStrategyHandler`, `AdminHandler`) wrap protocol operations and track ghost variables
+- **Ghost Variables**: Track expected state (deposits, withdrawals, leverage, health checks) to verify actual state matches expectations
+- **Mock Protocols**: Full simulation of Aave V3 and Uniswap V4 protocols to avoid RPC rate limiting
+- **10+ Critical Invariants**: Supply consistency, leverage bounds, health factor safety, emergency synchronization, no value leaks, etc.
+- **Configuration**: 256 runs × 50 depth per test = 12,800 operations per invariant
 
 ## Code Coverage
 
@@ -69,12 +80,26 @@ test/
 │   ├── WETHLoopStrategy.t.sol             #  5 tests - WETH leveraged strategy
 │   ├── StrategyHealthCheck.t.sol          #  9 tests - Strategy health & harvest
 │   └── WETHLoopStrategyErrorPaths.t.sol   # 18 tests - WETH strategy error paths
-├── fuzz/                                   # Fuzzing tests (43 tests)
+├── fuzz/                                   # Stateless fuzzing (43 tests)
 │   ├── BaseVaultFuzz.t.sol                # 15 tests - Vault fuzzing
 │   ├── WETHLoopStrategyFuzz.t.sol         # 13 tests - WETH strategy fuzzing
 │   └── AaveSimpleStrategyFuzz.t.sol       # 15 tests - Aave strategy fuzzing
-└── mocks/
-    └── MockStrategy.sol                   # Mock strategy for unit tests
+├── invariant/                              # Stateful fuzzing (27 tests)
+│   ├── InvariantBase.sol                  # Base contract with shared constants
+│   ├── BaseVaultInvariant.t.sol           #  9 tests - Vault invariants
+│   ├── WETHLoopStrategyInvariant.t.sol    #  9 tests - Strategy invariants
+│   ├── IntegratedInvariant.t.sol          #  9 tests - System-wide invariants
+│   └── handlers/                          # Handler contracts
+│       ├── BaseVaultHandler.sol           # Vault operations handler
+│       ├── WETHLoopStrategyHandler.sol    # Strategy operations handler
+│       └── AdminHandler.sol               # Admin operations handler
+└── mocks/                                  # Mock contracts
+    ├── MockStrategy.sol                   # Mock strategy for unit tests
+    ├── MockWETH.sol                       # Mock WETH for invariant tests
+    ├── MockAavePool.sol                   # Mock Aave V3 Pool
+    ├── MockAToken.sol                     # Mock aToken
+    ├── MockVariableDebtToken.sol          # Mock debt token
+    └── MockPoolManager.sol                # Mock Uniswap V4 PoolManager
 ```
 
 ## Unit Tests Coverage
@@ -284,7 +309,7 @@ Tests error paths and edge cases for leveraged strategy:
 - `test_ImmutableValues` - Immutable values set correctly
 - `test_EmergencyMode_Propagates` - Emergency mode propagation
 
-## Fuzzing Tests Coverage
+## Stateless Fuzzing Tests Coverage
 
 ### BaseVaultFuzz.t.sol (15 tests)
 
@@ -373,7 +398,7 @@ Fuzzing tests for simple Aave lending with random amounts and time periods:
 - `testFuzz_Preview_MatchesActual` - Preview deposit matches actual
 - `testFuzz_PreviewWithdraw_MatchesActual` - Preview withdraw matches actual
 
-### Fuzzing Test Characteristics
+### Stateless Fuzzing Test Characteristics
 
 **Input Ranges**:
 - Token amounts: 100 wei - 1M tokens
@@ -400,6 +425,141 @@ Fuzzing tests for simple Aave lending with random amounts and time periods:
 - AaveSimpleStrategyFuzz: ~7s (fork + time warp)
 - **Total**: ~15s for 11,008 iterations
 
+## Stateful Fuzzing (Invariant) Tests Coverage
+
+> **🌟 Advanced Testing**: This section describes the **handler-based stateful fuzzing** approach, a sophisticated testing methodology that verifies system invariants across thousands of randomized operation sequences. Handlers wrap protocol operations and track ghost variables to ensure actual state matches expected state after complex interaction patterns.
+
+### BaseVaultInvariant.t.sol (9 tests)
+
+Stateful fuzzing using **handler pattern** to test vault invariants through randomized operation sequences:
+
+**Invariant Tests** (9 tests):
+- `invariant_TotalSupplyConsistency` - Total supply = user shares + dead shares + fee shares
+- `invariant_DeadSharesConstant` - Dead shares remain constant at 1000 wei
+- `invariant_ConversionReversibility` - convertToAssets(convertToShares(x)) ≈ x
+- `invariant_EmergencyModeSynchronized` - Vault and strategy emergency mode synced
+- `invariant_TotalAssetsConsistency` - Total assets calculation accurate
+- `invariant_WhitelistEnforcement` - Only whitelisted addresses hold shares
+- `invariant_HighWaterMarkBounded` - HWM ≤ totalAssets() always
+- `invariant_ProtocolFeeBounded` - Protocol fee ≤ 25% always
+- `invariant_CallSummary` - Statistics logging for debugging
+
+**Handler Operations**:
+- `deposit()` - Random amounts from random users
+- `withdraw()` - Random amounts from users with shares
+- `transfer()` - Random transfers between users
+- `assessFee()` - Trigger fee assessment
+- Admin operations via AdminHandler
+
+### WETHLoopStrategyInvariant.t.sol (9 tests)
+
+Stateful fuzzing for leveraged strategy with mock protocols:
+
+**Invariant Tests** (9 tests):
+- `invariant_LeverageWithinBounds` - Leverage never exceeds 14x
+- `invariant_HealthFactorSafe` - Health factor ≥ min threshold or emergency active
+- `invariant_TotalAssetsCalculation` - TotalAssets = aToken balance - debt + WETH
+- `invariant_EmergencyDivestClosesPosition` - Emergency divest closes position completely
+- `invariant_EmergencyModeSynchronized` - Strategy ↔ vault emergency sync
+- `invariant_StrategyVaultBinding` - Strategy bound to single vault
+- `invariant_MaxLeverageTracked` - Max leverage tracked correctly
+- `invariant_PositionValueConsistency` - Collateral - debt = equity
+- `invariant_CallSummary` - Statistics logging
+
+**Handler Operations**:
+- `deposit()` - Random deposits (1 wei - 100 ETH)
+- `withdraw()` - Random withdrawals maintaining position health
+- `checkHealth()` - Trigger health checks
+- `warpTime()` - Time progression for yield accrual
+
+### IntegratedInvariant.t.sol (9 tests)
+
+System-wide invariants combining vault, strategy, and admin operations:
+
+**Invariant Tests** (9 tests):
+- `invariant_TotalSupplyConsistency` - Total supply consistency across system
+- `invariant_VaultStrategyValueConsistency` - Vault and strategy values match
+- `invariant_NoValueLeak` - Total system value = sum of all positions
+- `invariant_SystemEmergencyConsistency` - Emergency mode propagates correctly
+- `invariant_LeverageWithinBounds` - System-wide leverage bounds
+- `invariant_HealthFactorSafe` - System-wide health safety
+- `invariant_WhitelistIntegrity` - Whitelist enforced across operations
+- `invariant_FeeBounded` - Fees bounded across fee changes
+- `invariant_IntegratedCallSummary` - Combined statistics
+
+**Handler Operations**: All handlers active
+- BaseVaultHandler (deposit, withdraw, transfer, assessFee)
+- WETHLoopStrategyHandler (deposit, withdraw, checkHealth, warpTime)
+- AdminHandler (whitelist, fees, emergency mode)
+
+### Stateful Fuzzing Configuration
+
+**Foundry Configuration** (foundry.toml):
+```toml
+[invariant]
+runs = 256              # Number of sequences per invariant
+depth = 50              # Operations per sequence
+fail_on_revert = false  # Allow reverts (expected behavior)
+shrink_run_limit = 5000 # Counterexample minimization
+
+# Fork invariant profile with reduced parameters to avoid RPC rate limiting
+[profile.fork-invariant.invariant]
+runs = 20               # Reduced for RPC rate limits
+depth = 10              # Reduced for RPC rate limits
+fail_on_revert = false
+shrink_run_limit = 1000
+```
+
+**Total Function Calls**: 256 runs × 50 depth × 27 tests = **345,600 operations** (mock mode)
+
+### Mock vs Fork Mode
+
+Invariant tests support two execution modes:
+
+**Mock Mode (default)**: Uses mock contracts to avoid RPC rate limiting
+- Faster execution (~31.6s for all tests)
+- No RPC dependencies
+- Full parameter depth (256 runs × 50 depth)
+
+**Fork Mode**: Tests against real Aave V3 and Uniswap V4 on mainnet fork
+- Real protocol behavior
+- Lower parameters to avoid rate limiting (20 runs × 10 depth)
+- Requires `ETHEREUM_MAINNET_RPC` in `.env`
+
+**Running Mock Mode** (default):
+```bash
+forge test --match-path "test/invariant/*.sol"
+```
+
+**Running Fork Mode**:
+```bash
+INVARIANT_USE_FORK=true FOUNDRY_PROFILE=fork-invariant forge test --match-path "test/invariant/*.sol"
+```
+
+**Configuration** (`.env`):
+```env
+ETHEREUM_MAINNET_RPC=https://your-rpc-url
+INVARIANT_USE_FORK=false  # Set to "true" for fork mode
+```
+
+**Mock Contracts** (avoid RPC rate limiting):
+- `MockWETH.sol` - WETH with mint/burn
+- `MockAavePool.sol` - Aave V3 Pool simulation (supply, borrow, repay, withdraw, health factor)
+- `MockAToken.sol` - Aave interest-bearing token
+- `MockVariableDebtToken.sol` - Aave debt token
+- `MockPoolManager.sol` - Uniswap V4 flash loan manager
+
+**Ghost Variables** (tracking expected state):
+- Vault: totalDeposited, totalWithdrawn, totalFeeMinted
+- Strategy: totalInvested, totalDivested, maxLeverage, emergencyDivestCount
+- Admin: whitelistAdditions, feeChanges, emergencyModeChanges
+
+**Performance** (256 runs × 50 depth):
+- BaseVaultInvariant: ~11.6s (9 invariants, 115,200 calls)
+- WETHLoopStrategyInvariant: ~9.3s (9 invariants, 115,200 calls)
+- IntegratedInvariant: ~10.7s (9 invariants, 115,200 calls)
+- **Total**: ~31.6s for 345,600 operations
+
 ## Running Tests
 
 ```bash
@@ -424,14 +584,29 @@ forge test -vvv
 # Run with gas report
 forge test --gas-report
 
-# Run fuzzing tests only
+# Run stateless fuzzing tests only
 forge test --match-path "test/fuzz/*.sol"
+
+# Run stateful fuzzing (invariant) tests only (mock mode - default)
+forge test --match-path "test/invariant/*.sol"
+
+# Run invariant tests in fork mode (real protocols)
+INVARIANT_USE_FORK=true FOUNDRY_PROFILE=fork-invariant forge test --match-path "test/invariant/*.sol"
 
 # Run fuzzing with custom iterations
 forge test --match-path "test/fuzz/*.sol" --fuzz-runs 1000
 
 # Run specific fuzzing test
 forge test --match-path "test/fuzz/BaseVaultFuzz.t.sol"
+
+# Run specific invariant test suite (mock mode)
+forge test --match-path "test/invariant/BaseVaultInvariant.t.sol"
+
+# Run specific invariant test suite (fork mode)
+INVARIANT_USE_FORK=true FOUNDRY_PROFILE=fork-invariant forge test --match-path "test/invariant/WETHLoopStrategyInvariant.t.sol"
+
+# Run invariant tests with higher depth (mock mode only - fork will hit rate limits)
+forge test --match-path "test/invariant/*.sol" --invariant-depth 100
 ```
 
 ## Coverage Areas
@@ -460,10 +635,12 @@ forge test --match-path "test/fuzz/BaseVaultFuzz.t.sol"
 
 ### 📝 Additional Test Coverage
 
-1. **Fuzzing Tests**: 43 stateless fuzzing tests covering randomized inputs
-2. **Invariant Testing**: Fuzzing tests verify core invariants across operations
-3. **Multi-User Scenarios**: Fuzzing tests cover concurrent users with different patterns
+1. **Stateless Fuzzing**: 43 tests covering randomized inputs (11,008 iterations)
+2. **Stateful Fuzzing**: 27 invariant tests with operation sequences (345,600 calls)
+3. **Multi-User Scenarios**: Both fuzzing types cover concurrent users
 4. **Edge Case Discovery**: Fuzzing discovers edge cases across wide input ranges
+5. **Mock Protocols**: Comprehensive mocks for Aave V3 and Uniswap V4
+6. **Ghost Variables**: Track expected state for invariant verification
 
 ## Key Test Patterns Used
 
