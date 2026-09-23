@@ -372,7 +372,8 @@ contract WETHLoopStrategyFuzzTest is Test {
         assertTrue(YieldBearingVault(vault).emergencyMode(), "Emergency mode should be active");
 
         uint256 finalDebt = IERC20(VARIABLE_DEBT_WETH).balanceOf(address(strategy));
-        assertLt(finalDebt, 100, "Debt should be fully repaid");
+        assertEq(finalDebt, 0, "Debt should be fully repaid");
+        assertApproxEqAbs(strategy.totalAssets(), depositAmount, 10, "Emergency divest should preserve equity");
     }
 
     /**

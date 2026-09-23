@@ -571,19 +571,20 @@ contract WETHLoopStrategyTest is Test {
         console.log("Final Collateral (WETH):", finalCollateral);
         console.log("Final Debt (WETH):", finalDebt);
 
-        // Debt should be fully repaid (allow small dust)
-        assertLt(finalDebt, 100, "Debt should be fully repaid");
+        // Debt must be fully repaid (the exit reverts otherwise)
+        assertEq(finalDebt, 0, "Debt should be fully repaid");
 
-        // Collateral should be minimal (withdrawn to strategy)
-        assertLt(finalCollateral, 100, "Collateral should be minimal");
+        // Collateral withdrawn, up to Aave's scaled-balance rounding
+        assertLe(finalCollateral, 2, "Collateral should be withdrawn");
 
         // The assets should be sitting in the strategy now
         uint256 strategyWethBalance = weth.balanceOf(address(strategy));
         console.log("Strategy WETH Balance:", strategyWethBalance);
         assertGt(strategyWethBalance, 0, "Strategy should hold withdrawn assets");
 
-        // Should be close to original deposit amount (minus some small losses from rounding)
-        assertApproxEqAbs(strategyWethBalance, depositAmount, 0.001 ether, "Should recover most of deposit");
+        // Zero-fee flash loan and no time elapsed: only Aave rounding (a few wei) is lost
+        assertApproxEqAbs(strategyWethBalance, depositAmount, 10, "Should recover the deposit");
+        assertEq(strategy.totalAssets(), strategyWethBalance + finalCollateral, "Idle WETH is counted as equity");
 
         // ============ ASSERT: NEW DEPOSITS BLOCKED ============
         // Try to deposit - should revert
@@ -623,16 +624,19 @@ contract WETHLoopStrategyTest is Test {
     }
 
     /**
-     * @notice Tests that withdrawals work correctly in emergency mode without attempting divest.
+     * @notice Tests that withdrawals after an emergency divest are paid from the strategy's idle WETH.
      * @dev Verifies:
      *      - Users can withdraw after emergency mode activation
-     *      - Withdrawals don't attempt to divest (position already closed)
-     *      - Users receive their funds from the strategy's WETH balance
+     *      - The position is not re-opened
+     *      - The user receives the proportional share of equity, within rounding
      */
-    function test_EmergencyMode_WithdrawalsSkipDivest() public {
+    function test_EmergencyMode_WithdrawalsPaidFromIdleWeth() public {
         // ============ ARRANGE ============
         address user = makeAddr("user");
         uint256 depositAmount = 1 ether;
+
+        // Reset the vault to its initial deposit: setUp's 100 WETH donation would otherwise price the shares
+        deal(address(weth), vault, INITIAL_DEPOSIT);
 
         // Whitelist and fund user
         vm.prank(vaultOwner);
@@ -671,6 +675,7 @@ contract WETHLoopStrategyTest is Test {
         assertGt(strategyWethBalance, 0, "Strategy should hold divested assets");
 
         // ============ ACT: USER WITHDRAWS ============
+        uint256 expectedAssets = shares * (weth.balanceOf(vault) + strategy.totalAssets()) / YieldBearingVault(vault).totalSupply();
         uint256 userBalanceBefore = weth.balanceOf(user);
 
         vm.prank(user);
@@ -684,9 +689,10 @@ contract WETHLoopStrategyTest is Test {
         console.log("Actual Received:", actualReceived);
 
         // ============ ASSERT: USER RECEIVED FUNDS ============
-        assertGt(actualReceived, 0, "User should receive funds");
-        // Allow up to 2% loss due to flash loan costs and rounding in emergency divest
-        assertApproxEqAbs(actualReceived, depositAmount, 0.02 ether, "User should receive close to deposit amount");
+        assertEq(actualReceived, assetsReceived, "Transferred amount should match the returned amount");
+        assertApproxEqAbs(actualReceived, expectedAssets, 2, "User should receive the proportional share of equity");
+        // Zero-fee flash loan and no time elapsed: only Aave rounding (a few wei) is lost
+        assertApproxEqAbs(actualReceived, depositAmount, 10, "User should receive the deposit back");
 
         // Verify no more debt (position wasn't re-opened)
         uint256 finalDebt = IERC20(VARIABLE_DEBT_WETH).balanceOf(address(strategy));
