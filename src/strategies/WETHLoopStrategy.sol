@@ -254,11 +254,10 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
     }
 
     /**
-     * @notice Checks strategy health and triggers emergency divest if needed.
-     * @dev If healthFactor < minHealthFactor:
-     *      1. Divests entire position to close leverage
-     *      2. Activates emergency mode on vault to block new deposits
-     *      3. Returns false to signal health check failure
+     * @notice Checks strategy health and triggers an emergency divest if needed.
+     * @dev If healthFactor < minHealthFactor, activates emergency mode on the vault. The vault propagates it to
+     *      this strategy, whose setEmergencyMode() closes the position (see BaseStrategy). If the position is
+     *      still open because an earlier exit failed, calling this again retries the exit.
      * @return healthy True if health factor is acceptable, false otherwise.
      */
     function checkHealth() external override returns (bool healthy) {
@@ -271,19 +270,16 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
             return true;
         }
 
-        // Effects & Interactions: Emergency divest and activate emergency mode
-        _emergencyDivest();
+        // Interactions: activation blocks deposits and closes the position
+        BaseVault(VAULT).activateEmergencyMode();
 
         return false;
     }
 
     /**
-     * @dev Emergency divest: closes entire leveraged position and activates vault emergency mode.
+     * @dev Emergency divest: repays all debt with a flash loan and withdraws all collateral to idle WETH.
      */
-    function _emergencyDivest() internal {
-        // Effects: Activate emergency mode on vault first
-        BaseVault(VAULT).activateEmergencyMode();
-
+    function _exitPosition() internal override {
         // Checks
         uint256 totalCollateral = IERC20(A_TOKEN).balanceOf(address(this));
         uint256 totalDebt = IERC20(VARIABLE_DEBT_TOKEN).balanceOf(address(this));

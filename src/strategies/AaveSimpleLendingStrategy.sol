@@ -67,6 +67,16 @@ contract AaveSimpleLendingStrategy is BaseStrategy {
     }
 
     /**
+     * @dev Withdraws the whole Aave supply to idle assets.
+     */
+    function _exitPosition() internal override {
+        if (IERC20(A_TOKEN).balanceOf(address(this)) == 0) return;
+        //slither-disable-next-line unused-return
+        // Withdrawn amount is the full aToken balance
+        AaveAdapter.withdraw(AAVE_POOL, asset(), type(uint256).max);
+    }
+
+    /**
      * @dev Aave lending yields auto-compound via aToken rebasing.
      */
     function harvest() external view override onlyVaultAdmin {

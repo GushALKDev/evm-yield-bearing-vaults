@@ -40,6 +40,7 @@ abstract contract BaseStrategy is ERC4626 {
     event EmergencyModeSet(bool isOpen);
     event LeverageSet(uint8 newLeverage);
     event HealthFactorsSet(uint256 minHealth, uint256 targetHealth);
+    event EmergencyExitFailed(bytes reason);
 
     /*//////////////////////////////////////////////////////////////
                                  ERRORS
@@ -48,6 +49,7 @@ abstract contract BaseStrategy is ERC4626 {
     error OnlyVault();
     error NotVaultAdmin();
     error StrategyInEmergency();
+    error OnlySelf();
 
     /*//////////////////////////////////////////////////////////////
                               CONSTRUCTOR
@@ -110,14 +112,14 @@ abstract contract BaseStrategy is ERC4626 {
     }
 
     /**
-     * @dev Allowed during emergency mode (exit hatch).
+     * @dev Allowed during emergency mode.
      */
     function withdraw(uint256 assets, address receiver, address owner) public virtual override onlyVault returns (uint256) {
         return super.withdraw(assets, receiver, owner);
     }
 
     /**
-     * @dev Allowed during emergency mode (exit hatch).
+     * @dev Allowed during emergency mode.
      */
     function redeem(uint256 shares, address receiver, address owner) public virtual override onlyVault returns (uint256) {
         return super.redeem(shares, receiver, owner);
@@ -131,15 +133,36 @@ abstract contract BaseStrategy is ERC4626 {
                            ADMIN FUNCTIONS
     //////////////////////////////////////////////////////////////*/
 
+    /**
+     * @dev Activation always attempts to close the external position, whoever triggered it (admin or health
+     *      check). If the exit reverts, emergency mode stays active, EmergencyExitFailed is emitted and
+     *      withdrawals keep working through _divest(). Calling it again with true retries the exit.
+     *      Deactivation reinvests the idle assets.
+     */
     function setEmergencyMode(bool _active) external onlyVault {
+        // Effects
         bool wasInEmergency = emergencyMode;
         emergencyMode = _active;
         emit EmergencyModeSet(_active);
 
-        // If deactivating emergency mode, reinvest available assets
-        if (wasInEmergency && !_active) {
+        // Interactions
+        if (_active) {
+            try this.exitPosition() {}
+            catch (bytes memory reason) {
+                emit EmergencyExitFailed(reason);
+            }
+        } else if (wasInEmergency) {
             _reinvest();
         }
+    }
+
+    /**
+     * @notice Closes the external position and keeps the proceeds as idle assets.
+     * @dev External only so setEmergencyMode() can call it inside try/catch. Callable by the strategy itself only.
+     */
+    function exitPosition() external {
+        if (msg.sender != address(this)) revert OnlySelf();
+        _exitPosition();
     }
 
     /**
@@ -166,16 +189,12 @@ abstract contract BaseStrategy is ERC4626 {
     }
 
     /**
-     * @dev Divests assets from the external protocol before withdrawal.
-     *      In emergency mode, skip divest since position is already closed.
-     *      Assets are held directly in the strategy after emergency divest,
-     *      so we only need to transfer them to the receiver.
+     * @dev Divests assets from the external protocol before withdrawal, in every mode.
+     *      _divest() pays from idle assets first, so after an emergency exit it does not touch the protocol,
+     *      and if the exit failed it deleverages proportionally.
      */
     function _withdraw(address caller, address receiver, address owner, uint256 assets, uint256 shares) internal virtual override {
-        // Only divest if not in emergency mode (position already closed during emergency)
-        if (!emergencyMode) {
-            _divest(assets);
-        }
+        _divest(assets);
         super._withdraw(caller, receiver, owner, assets, shares);
     }
 
@@ -184,6 +203,11 @@ abstract contract BaseStrategy is ERC4626 {
     //////////////////////////////////////////////////////////////*/
 
     function _invest(uint256 assets) internal virtual;
+
+    /**
+     * @dev Closes the external position. Default is a no-op for strategies without one.
+     */
+    function _exitPosition() internal virtual {}
 
     /**
      * @dev Must ensure the contract holds `assets` amount after this call.
