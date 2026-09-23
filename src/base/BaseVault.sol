@@ -8,6 +8,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {Whitelist} from "../access/Whitelist.sol";
 import {BaseStrategy} from "./BaseStrategy.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 /**
  * @title BaseVault
@@ -193,19 +194,27 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
                         ERC4626 OVERRIDES
     //////////////////////////////////////////////////////////////*/
 
+    /**
+     * @dev The performance fee is assessed before ERC4626 prices the operation, so shares and assets are
+     *      converted at the post-fee share price. Same for mint, withdraw and redeem.
+     */
     function deposit(uint256 assets, address receiver) public virtual override nonReentrant returns (uint256) {
+        _assessPerformanceFee();
         return super.deposit(assets, receiver);
     }
 
     function mint(uint256 shares, address receiver) public virtual override nonReentrant returns (uint256) {
+        _assessPerformanceFee();
         return super.mint(shares, receiver);
     }
 
     function withdraw(uint256 assets, address receiver, address owner) public virtual override nonReentrant returns (uint256) {
+        _assessPerformanceFee();
         return super.withdraw(assets, receiver, owner);
     }
 
     function redeem(uint256 shares, address receiver, address owner) public virtual override nonReentrant returns (uint256) {
+        _assessPerformanceFee();
         return super.redeem(shares, receiver, owner);
     }
 
@@ -226,12 +235,10 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
     //////////////////////////////////////////////////////////////*/
 
     /**
-     * @dev Enforces whitelist, assesses fees, updates HWM, and pushes funds to strategy.
+     * @dev Enforces whitelist, updates HWM, and pushes funds to strategy. Fees are assessed by the entry points.
      */
     function _deposit(address caller, address receiver, uint256 assets, uint256 shares) internal virtual override whenNotEmergency {
         if (!isWhitelisted[receiver]) revert NotWhitelisted(receiver);
-
-        _assessPerformanceFee();
 
         super._deposit(caller, receiver, assets, shares);
 
@@ -249,11 +256,9 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
     }
 
     /**
-     * @dev Assesses fees, pulls funds from strategy if needed, and updates HWM.
+     * @dev Pulls funds from strategy if needed and updates HWM. Fees are assessed by the entry points.
      */
     function _withdraw(address caller, address receiver, address owner, uint256 assets, uint256 shares) internal virtual override {
-        _assessPerformanceFee();
-
         uint256 localBalance = IERC20(asset()).balanceOf(address(this));
 
         if (localBalance < assets) {
@@ -305,7 +310,9 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
             uint256 feeInAssets = profit * feeBps / MAX_BPS;
 
             if (feeInAssets > 0) {
-                uint256 feeShares = convertToShares(feeInAssets);
+                // Priced against assets net of the fee, so the minted shares are worth feeInAssets after minting
+                // (convertToShares would price them before the mint dilutes them). Offsets match ERC4626 (+1, +1).
+                uint256 feeShares = Math.mulDiv(feeInAssets, totalSupply() + 1, currentAssets - feeInAssets + 1);
 
                 if (feeShares > 0) {
                     _mint(recipient, feeShares);
