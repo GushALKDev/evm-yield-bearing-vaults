@@ -16,6 +16,7 @@ import {MockAavePool} from "../mocks/MockAavePool.sol";
 import {MockAToken} from "../mocks/MockAToken.sol";
 import {MockVariableDebtToken} from "../mocks/MockVariableDebtToken.sol";
 import {MockPoolManager} from "../mocks/MockPoolManager.sol";
+import {VaultDeployer} from "../utils/VaultDeployer.sol";
 
 /**
  * @title IntegratedInvariantTest
@@ -133,9 +134,9 @@ contract IntegratedInvariantTest is InvariantBase {
             mockWeth.mint(owner, INITIAL_DEPOSIT);
         }
 
-        address predictedVault = vm.computeCreateAddress(owner, vm.getNonce(owner));
-        weth.approve(predictedVault, INITIAL_DEPOSIT);
-        vault = new YieldBearingVault(weth, owner, admin, INITIAL_DEPOSIT);
+        VaultDeployer vaultDeployer = new VaultDeployer();
+        weth.approve(address(vaultDeployer), INITIAL_DEPOSIT);
+        vault = vaultDeployer.deploy(weth, owner, admin, INITIAL_DEPOSIT);
         vm.stopPrank();
 
         strategy = new WETHLoopStrategy(

@@ -5,6 +5,7 @@ import {Test, console} from "forge-std/Test.sol";
 import {YieldBearingVault} from "../../src/vaults/YieldBearingVault.sol";
 import {MockStrategy} from "../mocks/MockStrategy.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {VaultDeployer} from "../utils/VaultDeployer.sol";
 
 /**
  * @title MockERC20
@@ -81,10 +82,9 @@ contract YieldFlowTest is Test {
         asset = new MockERC20();
 
         // ============ DEPLOY VAULT ============
-        // Pre-compute vault address to approve initial deposit before deployment
-        address vaultAddr = vm.computeCreateAddress(owner, vm.getNonce(owner));
-        asset.approve(vaultAddr, INITIAL_DEPOSIT_DEAD);
-        vault = new YieldBearingVault(asset, owner, owner, INITIAL_DEPOSIT_DEAD);
+        VaultDeployer vaultDeployer = new VaultDeployer();
+        asset.approve(address(vaultDeployer), INITIAL_DEPOSIT_DEAD);
+        vault = vaultDeployer.deploy(asset, owner, owner, INITIAL_DEPOSIT_DEAD);
 
         // ============ DEPLOY & CONNECT STRATEGY ============
         strategy = new MockStrategy(asset, address(vault));

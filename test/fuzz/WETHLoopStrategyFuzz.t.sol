@@ -9,6 +9,7 @@ import {IPool} from "../../src/interfaces/aave/IPool.sol";
 import {Constants} from "../../src/utils/Constants.sol";
 import {YieldBearingVault} from "../../src/vaults/YieldBearingVault.sol";
 import {ForkConfig} from "../utils/ForkConfig.sol";
+import {VaultDeployer} from "../utils/VaultDeployer.sol";
 
 /**
  * @title WETHLoopStrategyFuzzTest
@@ -70,9 +71,9 @@ contract WETHLoopStrategyFuzzTest is Test {
         vm.startPrank(vaultOwner);
         deal(address(weth), vaultOwner, INITIAL_DEPOSIT);
 
-        address predictedVault = vm.computeCreateAddress(vaultOwner, vm.getNonce(vaultOwner));
-        weth.approve(predictedVault, INITIAL_DEPOSIT);
-        YieldBearingVault bVault = new YieldBearingVault(weth, vaultOwner, vaultAdmin, INITIAL_DEPOSIT);
+        VaultDeployer vaultDeployer = new VaultDeployer();
+        weth.approve(address(vaultDeployer), INITIAL_DEPOSIT);
+        YieldBearingVault bVault = vaultDeployer.deploy(weth, vaultOwner, vaultAdmin, INITIAL_DEPOSIT);
         vm.stopPrank();
 
         vault = address(bVault);

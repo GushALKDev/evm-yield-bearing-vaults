@@ -9,6 +9,7 @@ import {IPool} from "../../src/interfaces/aave/IPool.sol";
 import {Constants} from "../../src/utils/Constants.sol";
 import {YieldBearingVault} from "../../src/vaults/YieldBearingVault.sol";
 import {ForkConfig} from "../utils/ForkConfig.sol";
+import {VaultDeployer} from "../utils/VaultDeployer.sol";
 
 /**
  * @title StrategyHealthCheckTest
@@ -78,9 +79,9 @@ contract StrategyHealthCheckTest is Test {
         // ============ DEPLOY WETH VAULT & STRATEGY ============
         vm.startPrank(vaultOwner);
         deal(address(weth), vaultOwner, INITIAL_DEPOSIT);
-        address wethVaultAddr = vm.computeCreateAddress(vaultOwner, vm.getNonce(vaultOwner));
-        weth.approve(wethVaultAddr, INITIAL_DEPOSIT);
-        wethVault = new YieldBearingVault(weth, vaultOwner, vaultAdmin, INITIAL_DEPOSIT);
+        VaultDeployer vaultDeployer = new VaultDeployer();
+        weth.approve(address(vaultDeployer), INITIAL_DEPOSIT);
+        wethVault = vaultDeployer.deploy(weth, vaultOwner, vaultAdmin, INITIAL_DEPOSIT);
         vm.stopPrank();
 
         (bool success, bytes memory data) = AAVE_ADDRESS_PROVIDER.staticcall(abi.encodeWithSignature("getPool()"));
@@ -106,9 +107,8 @@ contract StrategyHealthCheckTest is Test {
         // ============ DEPLOY USDC VAULT & STRATEGY ============
         vm.startPrank(vaultOwner);
         deal(address(usdc), vaultOwner, INITIAL_DEPOSIT);
-        address usdcVaultAddr = vm.computeCreateAddress(vaultOwner, vm.getNonce(vaultOwner));
-        usdc.approve(usdcVaultAddr, INITIAL_DEPOSIT);
-        usdcVault = new YieldBearingVault(usdc, vaultOwner, vaultAdmin, INITIAL_DEPOSIT);
+        usdc.approve(address(vaultDeployer), INITIAL_DEPOSIT);
+        usdcVault = vaultDeployer.deploy(usdc, vaultOwner, vaultAdmin, INITIAL_DEPOSIT);
         vm.stopPrank();
 
         usdcStrategy = new AaveSimpleLendingStrategy(usdc, address(usdcVault), AAVE_V3_POOL, AUSDC_TOKEN);

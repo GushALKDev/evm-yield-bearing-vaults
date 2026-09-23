@@ -7,6 +7,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Constants} from "../../src/utils/Constants.sol";
 import {YieldBearingVault} from "../../src/vaults/YieldBearingVault.sol";
 import {ForkConfig} from "../utils/ForkConfig.sol";
+import {VaultDeployer} from "../utils/VaultDeployer.sol";
 
 /**
  * @title WETHLoopStrategyErrorPathsTest
@@ -65,9 +66,9 @@ contract WETHLoopStrategyErrorPathsTest is Test {
         // ============ DEPLOY VAULT ============
         vm.startPrank(vaultOwner);
         deal(address(weth), vaultOwner, INITIAL_DEPOSIT);
-        address vaultAddr = vm.computeCreateAddress(vaultOwner, vm.getNonce(vaultOwner));
-        weth.approve(vaultAddr, INITIAL_DEPOSIT);
-        vault = new YieldBearingVault(weth, vaultOwner, vaultAdmin, INITIAL_DEPOSIT);
+        VaultDeployer vaultDeployer = new VaultDeployer();
+        weth.approve(address(vaultDeployer), INITIAL_DEPOSIT);
+        vault = vaultDeployer.deploy(weth, vaultOwner, vaultAdmin, INITIAL_DEPOSIT);
         vm.stopPrank();
 
         // ============ RESOLVE AAVE POOL ============

@@ -7,6 +7,7 @@ import {YieldBearingVault} from "../../src/vaults/YieldBearingVault.sol";
 import {AaveSimpleLendingStrategy} from "../../src/strategies/AaveSimpleLendingStrategy.sol";
 import {Constants} from "../../src/utils/Constants.sol";
 import {ForkConfig} from "../utils/ForkConfig.sol";
+import {VaultDeployer} from "../utils/VaultDeployer.sol";
 
 /**
  * @title AaveSimpleStrategyForkTest
@@ -100,10 +101,9 @@ contract AaveSimpleStrategyForkTest is Test {
         // ============ DEPLOY VAULT ============
         vm.startPrank(owner);
 
-        // Pre-compute vault address to approve initial deposit
-        address vaultAddr = vm.computeCreateAddress(owner, vm.getNonce(owner));
-        usdc.approve(vaultAddr, REQUIRED_DEPOSIT);
-        vault = new YieldBearingVault(usdc, owner, owner, REQUIRED_DEPOSIT);
+        VaultDeployer vaultDeployer = new VaultDeployer();
+        usdc.approve(address(vaultDeployer), REQUIRED_DEPOSIT);
+        vault = vaultDeployer.deploy(usdc, owner, owner, REQUIRED_DEPOSIT);
 
         // ============ DEPLOY STRATEGY ============
         strategy = new AaveSimpleLendingStrategy(usdc, address(vault), AAVE_POOL, A_USDC);
