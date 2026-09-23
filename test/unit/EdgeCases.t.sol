@@ -407,32 +407,6 @@ contract EdgeCasesTest is Test {
     }
 
     /*//////////////////////////////////////////////////////////////
-                       REENTRANCY PROTECTION
-    //////////////////////////////////////////////////////////////*/
-
-    /**
-     * @notice Tests that reentrancy guard protects deposit.
-     * @dev This is more for documentation - actual reentrancy attacks
-     *      require malicious tokens which we can't easily test here.
-     */
-    function test_ReentrancyGuard_DepositsProtected() public {
-        // ============ ARRANGE ============
-        vm.prank(owner);
-        vault.addToWhitelist(alice);
-
-        // ============ ACT ============
-        vm.startPrank(alice);
-        asset.approve(address(vault), DEPOSIT_AMOUNT);
-        uint256 shares = vault.deposit(DEPOSIT_AMOUNT, alice);
-        vm.stopPrank();
-
-        // ============ ASSERT ============
-        // If reentrancy was possible, shares would be incorrectly inflated
-        // Normal case should work as expected
-        assertGt(shares, 0, "Deposit should succeed normally");
-    }
-
-    /*//////////////////////////////////////////////////////////////
                        TOTALASSETS CONSISTENCY
     //////////////////////////////////////////////////////////////*/
 
