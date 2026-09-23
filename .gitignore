@@ -36,6 +36,3 @@ node_modules/
 # Foundry
 .foundry/
 .qd/
-
-# Libraries (dependencies)
-lib/
