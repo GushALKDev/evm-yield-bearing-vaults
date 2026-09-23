@@ -25,6 +25,14 @@ abstract contract BaseStrategy is ERC4626 {
     address public immutable VAULT;
     bool public emergencyMode;
 
+    /**
+     * @dev Virtual share offset (OpenZeppelin ERC4626 inflation mitigation). Strategy shares are only held
+     *      by the vault, so the vault's dead shares do not protect strategy share pricing. With idle assets
+     *      counted in totalAssets(), a donation to an empty strategy would otherwise round the vault's
+     *      strategy shares down to zero.
+     */
+    uint8 private constant DECIMALS_OFFSET = 6;
+
     /*//////////////////////////////////////////////////////////////
                                  EVENTS
     //////////////////////////////////////////////////////////////*/
@@ -113,6 +121,10 @@ abstract contract BaseStrategy is ERC4626 {
      */
     function redeem(uint256 shares, address receiver, address owner) public virtual override onlyVault returns (uint256) {
         return super.redeem(shares, receiver, owner);
+    }
+
+    function _decimalsOffset() internal pure override returns (uint8) {
+        return DECIMALS_OFFSET;
     }
 
     /*//////////////////////////////////////////////////////////////

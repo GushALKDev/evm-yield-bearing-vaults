@@ -52,7 +52,7 @@ contract MockAavePool is IPool {
                           POOL FUNCTIONS
     //////////////////////////////////////////////////////////////*/
 
-    function supply(address asset, uint256 amount, address onBehalfOf, uint16) external override {
+    function supply(address asset, uint256 amount, address onBehalfOf, uint16) public virtual override {
         IERC20(asset).transferFrom(msg.sender, address(this), amount);
         aTokens[asset].mint(onBehalfOf, amount);
     }

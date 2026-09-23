@@ -49,9 +49,21 @@ contract AaveSimpleLendingStrategy is BaseStrategy {
         AaveAdapter.supply(AAVE_POOL, address(asset()), assets);
     }
 
+    /**
+     * @dev Pays from idle assets first and withdraws only the shortfall from Aave.
+     */
     function _divest(uint256 assets) internal override {
-        uint256 withdrawn = AaveAdapter.withdraw(AAVE_POOL, asset(), assets);
-        if (withdrawn < assets) revert InsufficientAaveWithdrawal(withdrawn, assets);
+        address assetAddr = asset();
+        uint256 idle = IERC20(assetAddr).balanceOf(address(this));
+        if (idle >= assets) return;
+
+        // Gas: unchecked safe (idle < assets checked above)
+        uint256 shortfall;
+        unchecked {
+            shortfall = assets - idle;
+        }
+        uint256 withdrawn = AaveAdapter.withdraw(AAVE_POOL, assetAddr, shortfall);
+        if (withdrawn < shortfall) revert InsufficientAaveWithdrawal(withdrawn, shortfall);
     }
 
     /**
@@ -69,9 +81,9 @@ contract AaveSimpleLendingStrategy is BaseStrategy {
     }
 
     /**
-     * @dev Measured by the aToken balance which includes accrued interest.
+     * @dev aToken balance (includes accrued interest) plus idle assets held by the strategy.
      */
     function totalAssets() public view override returns (uint256) {
-        return IERC20(A_TOKEN).balanceOf(address(this));
+        return IERC20(A_TOKEN).balanceOf(address(this)) + IERC20(asset()).balanceOf(address(this));
     }
 }

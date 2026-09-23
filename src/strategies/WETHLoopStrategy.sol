@@ -149,19 +149,26 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
     }
 
     /**
-     * @dev Deleverages position proportionally using flash loan.
+     * @dev Pays from idle WETH first, then deleverages the position proportionally using a flash loan.
      */
     function _divest(uint256 assets) internal override {
         // Checks
+        // Gas: cache asset to avoid repeated calls
+        address assetAddr = asset();
+
+        uint256 idle = IERC20(assetAddr).balanceOf(address(this));
+        if (idle >= assets) return;
+        // Gas: unchecked safe (idle < assets checked above)
+        unchecked {
+            assets -= idle;
+        }
+
         uint256 totalCollateral = IERC20(A_TOKEN).balanceOf(address(this));
         uint256 totalDebt = IERC20(VARIABLE_DEBT_TOKEN).balanceOf(address(this));
 
         //slither-disable-next-line incorrect-equality
         // Legitimate check: ERC20 balance can be exactly zero (empty position)
         if (totalCollateral == 0) return;
-
-        // Gas: cache asset to avoid repeated calls
-        address assetAddr = asset();
 
         //slither-disable-next-line incorrect-equality
         // Legitimate check: no debt means no leverage, simple withdrawal
@@ -302,17 +309,19 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
     }
 
     /**
-     * @dev Returns net equity (collateral - debt).
+     * @dev Returns net equity: collateral + idle WETH - debt - outstanding flash loan.
+     *      Idle WETH is what an emergency divest leaves in the strategy. The outstanding flash loan
+     *      is subtracted so borrowed WETH is not counted as equity while a loan is open.
      */
     function totalAssets() public view override returns (uint256) {
-        uint256 totalCollateral = IERC20(A_TOKEN).balanceOf(address(this));
-        uint256 totalDebt = IERC20(VARIABLE_DEBT_TOKEN).balanceOf(address(this));
+        uint256 assets = IERC20(A_TOKEN).balanceOf(address(this)) + IERC20(asset()).balanceOf(address(this));
+        uint256 liabilities = IERC20(VARIABLE_DEBT_TOKEN).balanceOf(address(this)) + _flashLoanOutstanding();
 
-        if (totalCollateral <= totalDebt) return 0;
+        if (assets <= liabilities) return 0;
 
-        // Gas: unchecked safe (already checked totalCollateral > totalDebt)
+        // Gas: unchecked safe (already checked assets > liabilities)
         unchecked {
-            return totalCollateral - totalDebt;
+            return assets - liabilities;
         }
     }
 }

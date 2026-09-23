@@ -22,6 +22,12 @@ abstract contract UniswapV4Adapter is IUnlockCallback {
 
     IPoolManager public immutable POOL_MANAGER;
 
+    /**
+     * @dev Transient slot with the amount owed to the PoolManager while a flash loan is open.
+     *      keccak256("yieldbearingvaults.uniswapv4adapter.flashloan.outstanding")
+     */
+    bytes32 private constant FLASH_LOAN_OUTSTANDING_SLOT = 0xf9710ff79749ff57ca031f5f16dbb0c4aeebed10d7655147a8107dc883064f5b;
+
     /*//////////////////////////////////////////////////////////////
                                  ERRORS
     //////////////////////////////////////////////////////////////*/
@@ -63,6 +69,9 @@ abstract contract UniswapV4Adapter is IUnlockCallback {
 
         (Currency currency, uint256 amount, bytes memory userData) = abi.decode(data, (Currency, uint256, bytes));
 
+        // Effects: record the liability before the borrowed tokens arrive
+        _setFlashLoanOutstanding(amount);
+
         poolManager.take(currency, address(this), amount);
         _onFlashLoan(currency, amount, userData);
 
@@ -74,7 +83,31 @@ abstract contract UniswapV4Adapter is IUnlockCallback {
         uint256 paid = poolManager.settle();
         if (paid != amount) revert FlashLoanRepaymentFailed(paid, amount);
 
+        _setFlashLoanOutstanding(0);
+
         return "";
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                         FLASH LOAN ACCOUNTING
+    //////////////////////////////////////////////////////////////*/
+
+    /**
+     * @dev Amount currently owed to the PoolManager. Non-zero only inside unlockCallback, so accounting
+     *      that reads token balances can subtract borrowed tokens instead of counting them as equity.
+     */
+    function _flashLoanOutstanding() internal view returns (uint256 amount) {
+        bytes32 slot = FLASH_LOAN_OUTSTANDING_SLOT;
+        assembly ("memory-safe") {
+            amount := tload(slot)
+        }
+    }
+
+    function _setFlashLoanOutstanding(uint256 amount) private {
+        bytes32 slot = FLASH_LOAN_OUTSTANDING_SLOT;
+        assembly ("memory-safe") {
+            tstore(slot, amount)
+        }
     }
 
     /*//////////////////////////////////////////////////////////////
