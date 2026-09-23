@@ -8,6 +8,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IPool} from "../../src/interfaces/aave/IPool.sol";
 import {Constants} from "../../src/utils/Constants.sol";
 import {YieldBearingVault} from "../../src/vaults/YieldBearingVault.sol";
+import {ForkConfig} from "../utils/ForkConfig.sol";
 
 /**
  * @title StrategyHealthCheckTest
@@ -65,7 +66,7 @@ contract StrategyHealthCheckTest is Test {
         alice = makeAddr("alice");
 
         // ============ FORK MAINNET ============
-        vm.createSelectFork(vm.envString("ETHEREUM_MAINNET_RPC"));
+        ForkConfig.selectMainnetFork();
 
         weth = IERC20(WETH_MAINNET);
         usdc = IERC20(USDC_MAINNET);

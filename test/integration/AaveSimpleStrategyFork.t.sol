@@ -6,6 +6,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {YieldBearingVault} from "../../src/vaults/YieldBearingVault.sol";
 import {AaveSimpleLendingStrategy} from "../../src/strategies/AaveSimpleLendingStrategy.sol";
 import {Constants} from "../../src/utils/Constants.sol";
+import {ForkConfig} from "../utils/ForkConfig.sol";
 
 /**
  * @title AaveSimpleStrategyForkTest
@@ -87,7 +88,7 @@ contract AaveSimpleStrategyForkTest is Test {
         owner = makeAddr("owner");
 
         // ============ FORK MAINNET ============
-        vm.createSelectFork(vm.envString("ETHEREUM_MAINNET_RPC"));
+        ForkConfig.selectMainnetFork();
 
         usdc = IERC20(USDC);
         aUsdc = IERC20(A_USDC);

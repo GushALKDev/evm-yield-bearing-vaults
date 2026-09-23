@@ -8,6 +8,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IPool} from "../../src/interfaces/aave/IPool.sol";
 import {Constants} from "../../src/utils/Constants.sol";
 import {YieldBearingVault} from "../../src/vaults/YieldBearingVault.sol";
+import {ForkConfig} from "../utils/ForkConfig.sol";
 
 /**
  * @title WETHLoopStrategyFuzzTest
@@ -53,8 +54,7 @@ contract WETHLoopStrategyFuzzTest is Test {
         vaultOwner = makeAddr("vaultOwner");
         vaultAdmin = makeAddr("vaultAdmin");
 
-        string memory rpc = vm.envString("ETHEREUM_MAINNET_RPC");
-        vm.createSelectFork(rpc);
+        ForkConfig.selectMainnetFork();
 
         weth = IERC20(WETH_MAINNET);
         address poolManagerAddress = UNISWAP_V4_POOL_MANAGER;
