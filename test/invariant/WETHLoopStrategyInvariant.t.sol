@@ -37,6 +37,10 @@ contract WETHLoopStrategyInvariantTest is InvariantBase {
     uint256 constant MIN_HEALTH_FACTOR = 1.02e18;
     uint256 constant TARGET_HEALTH_FACTOR = 1.05e18;
     uint8 constant EMODE_ETH_CORRELATED = 1;
+    /// @dev Aave rounds scaled balances by up to 1 wei per supply, borrow, repay or withdraw. Exact in mock mode.
+    uint256 constant AAVE_ROUNDING_PER_OP = 4;
+    /// @dev Vault and strategy share conversions each round down by at most 1 wei.
+    uint256 constant EMERGENCY_REDEEM_ROUNDING = 2;
 
     /*//////////////////////////////////////////////////////////////
                                STATE
@@ -216,31 +220,25 @@ contract WETHLoopStrategyInvariantTest is InvariantBase {
         assertGe(healthFactor, MIN_HEALTH_FACTOR - 0.01e18, "Health factor below minimum");
     }
 
-    /// @notice Total assets equals aToken - debt + WETH balance.
+    /// @notice Total assets equals aToken + idle WETH - debt, exactly (no flash loan is open between calls).
     function invariant_TotalAssetsCalculation() public view {
         uint256 aTokenBalance = IERC20(aToken).balanceOf(address(strategy));
         uint256 debtBalance = IERC20(debtToken).balanceOf(address(strategy));
         uint256 wethBalance = weth.balanceOf(address(strategy));
 
-        uint256 expectedAssets;
-        if (aTokenBalance > debtBalance) {
-            expectedAssets = aTokenBalance - debtBalance + wethBalance;
-        } else {
-            expectedAssets = wethBalance;
-        }
-
-        uint256 reportedAssets = strategy.totalAssets();
-
-        assertApproxEqAbs(reportedAssets, expectedAssets, 100, "Total assets calculation mismatch");
+        assertEq(strategy.totalAssets(), aTokenBalance + wethBalance - debtBalance, "Total assets calculation mismatch");
     }
 
-    /// @notice After emergency divest, debt is fully repaid.
+    /// @notice While emergency mode is active, the position is closed (the exit has enough flash liquidity here).
     function invariant_EmergencyDivestClosesPosition() public view {
         if (!vault.emergencyMode()) return;
 
-        uint256 debt = IERC20(debtToken).balanceOf(address(strategy));
+        assertEq(IERC20(debtToken).balanceOf(address(strategy)), 0, "Debt remains after emergency divest");
+    }
 
-        assertLt(debt, 100, "Debt remains after emergency divest");
+    /// @notice During emergency mode, a redeeming user receives their proportional share of total equity.
+    function invariant_EmergencyRedeemIsProportional() public view {
+        assertLe(strategyHandler.ghost_maxEmergencyRedeemError(), EMERGENCY_REDEEM_ROUNDING, "Emergency redeem deviates from the pro rata share of equity");
     }
 
     /// @notice Vault and strategy emergency modes are synchronized.
@@ -262,28 +260,22 @@ contract WETHLoopStrategyInvariantTest is InvariantBase {
         }
     }
 
-    /// @notice Position value consistency through operations.
+    /// @notice Collateral + idle WETH - debt equals the equity expected from deposits, withdrawals and measured interest.
     function invariant_PositionValueConsistency() public view {
-        uint256 totalInvested = strategyHandler.ghost_totalInvested();
-        uint256 totalDivested = strategyHandler.ghost_totalDivested();
-        uint256 currentAssets = strategy.totalAssets();
+        uint256 collateral = IERC20(aToken).balanceOf(address(strategy));
+        uint256 debt = IERC20(debtToken).balanceOf(address(strategy));
+        uint256 equity = collateral + weth.balanceOf(address(strategy)) - debt;
 
-        if (totalInvested > 0) {
-            uint256 minExpected = (totalInvested * 90) / 100;
-
-            assertGe(
-                currentAssets + totalDivested + INITIAL_DEPOSIT,
-                minExpected > 1 ether ? minExpected - 1 ether : 0,
-                "Position value lost unexpectedly"
-            );
-        }
+        uint256 tolerance = strategyHandler.ghost_equityOps() * AAVE_ROUNDING_PER_OP;
+        assertApproxEqAbs(equity, strategyHandler.ghost_expectedEquity(), tolerance, "Position equity diverges from deposits, withdrawals and interest");
     }
 
     /*//////////////////////////////////////////////////////////////
                          CALL SUMMARY
     //////////////////////////////////////////////////////////////*/
 
-    function invariant_CallSummary() public view {
+    /// @notice Logs handler statistics after each run (Foundry hook, not an invariant).
+    function afterInvariant() public view {
         console2.log("=== Strategy Handler Stats ===");
         console2.log("Total Invested:", strategyHandler.ghost_totalInvested());
         console2.log("Total Divested:", strategyHandler.ghost_totalDivested());
@@ -295,5 +287,8 @@ contract WETHLoopStrategyInvariantTest is InvariantBase {
         console2.log("Last Collateral:", strategyHandler.ghost_lastCollateral());
         console2.log("Last Debt:", strategyHandler.ghost_lastDebt());
         console2.log("Last Health Factor:", strategyHandler.ghost_lastHealthFactor());
+        console2.log("Emergency Redeems:", strategyHandler.ghost_emergencyRedeems());
+        console2.log("Max Emergency Redeem Error:", strategyHandler.ghost_maxEmergencyRedeemError());
+        console2.log("Recoveries:", strategyHandler.ghost_recoveries());
     }
 }

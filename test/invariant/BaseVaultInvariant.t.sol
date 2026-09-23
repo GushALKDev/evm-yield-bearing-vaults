@@ -147,12 +147,14 @@ contract BaseVaultInvariantTest is InvariantBase {
         }
     }
 
-    /// @notice High water mark never exceeds total assets significantly.
-    function invariant_HighWaterMarkBounded() public view {
+    /// @notice The HWM follows its definition in BaseVault: +deposits, -withdrawals (floored at 0), raised to
+    ///         totalAssets() when fees are assessed with a non-zero rate and recipient. With no loss source in this
+    ///         suite (yield only), it never exceeds totalAssets() beyond share conversion rounding.
+    function invariant_HighWaterMarkFollowsDefinition() public view {
         uint256 hwm = vault.highWaterMark();
-        uint256 totalAssets = vault.totalAssets();
 
-        assertLe(hwm, totalAssets + (totalAssets / 10) + INITIAL_DEPOSIT, "HWM significantly exceeds total assets");
+        assertEq(hwm, vaultHandler.ghost_expectedHwm(), "HWM diverges from its definition");
+        assertLe(hwm, vault.totalAssets() + DUST_TOLERANCE, "HWM above total assets without any loss");
     }
 
     /// @notice Protocol fee is within valid bounds.
@@ -164,7 +166,8 @@ contract BaseVaultInvariantTest is InvariantBase {
                          CALL SUMMARY
     //////////////////////////////////////////////////////////////*/
 
-    function invariant_CallSummary() public view {
+    /// @notice Logs handler statistics after each run (Foundry hook, not an invariant).
+    function afterInvariant() public view {
         console2.log("=== Vault Handler Stats ===");
         console2.log("Deposits:", vaultHandler.ghost_depositCount());
         console2.log("Withdrawals:", vaultHandler.ghost_withdrawCount());
@@ -172,6 +175,7 @@ contract BaseVaultInvariantTest is InvariantBase {
         console2.log("Total Deposited:", vaultHandler.ghost_totalDeposited());
         console2.log("Total Withdrawn:", vaultHandler.ghost_totalWithdrawn());
         console2.log("Total Fees Minted:", vaultHandler.ghost_totalFeesMinted());
+        console2.log("Yield Events:", vaultHandler.ghost_yieldCount());
 
         console2.log("\n=== Admin Handler Stats ===");
         console2.log("Whitelist Additions:", adminHandler.ghost_whitelistAdditions());

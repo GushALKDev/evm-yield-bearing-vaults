@@ -39,6 +39,8 @@ contract IntegratedInvariantTest is InvariantBase {
     uint256 constant MIN_HEALTH_FACTOR = 1.02e18;
     uint256 constant TARGET_HEALTH_FACTOR = 1.05e18;
     uint8 constant EMODE_ETH_CORRELATED = 1;
+    /// @dev Aave rounds scaled balances by up to 1 wei per supply, borrow, repay or withdraw. Exact in mock mode.
+    uint256 constant AAVE_ROUNDING_PER_OP = 4;
 
     /*//////////////////////////////////////////////////////////////
                                STATE
@@ -188,18 +190,21 @@ contract IntegratedInvariantTest is InvariantBase {
         targetContract(address(strategyHandler));
         targetContract(address(adminHandler));
 
-        bytes4[] memory vaultSelectors = new bytes4[](4);
+        bytes4[] memory vaultSelectors = new bytes4[](5);
         vaultSelectors[0] = BaseVaultHandler.deposit.selector;
         vaultSelectors[1] = BaseVaultHandler.withdraw.selector;
         vaultSelectors[2] = BaseVaultHandler.transfer.selector;
         vaultSelectors[3] = BaseVaultHandler.assessFee.selector;
+        vaultSelectors[4] = BaseVaultHandler.simulateYield.selector;
         targetSelector(FuzzSelector({addr: address(vaultHandler), selectors: vaultSelectors}));
 
-        bytes4[] memory strategySelectors = new bytes4[](4);
+        bytes4[] memory strategySelectors = new bytes4[](6);
         strategySelectors[0] = WETHLoopStrategyHandler.deposit.selector;
         strategySelectors[1] = WETHLoopStrategyHandler.withdraw.selector;
         strategySelectors[2] = WETHLoopStrategyHandler.checkHealth.selector;
         strategySelectors[3] = WETHLoopStrategyHandler.warpTime.selector;
+        strategySelectors[4] = WETHLoopStrategyHandler.triggerEmergency.selector;
+        strategySelectors[5] = WETHLoopStrategyHandler.recover.selector;
         targetSelector(FuzzSelector({addr: address(strategyHandler), selectors: strategySelectors}));
 
         bytes4[] memory adminSelectors = new bytes4[](4);
@@ -223,12 +228,12 @@ contract IntegratedInvariantTest is InvariantBase {
                          INTEGRATED INVARIANTS
     //////////////////////////////////////////////////////////////*/
 
-    /// @notice Vault total assets >= strategy total assets (minus dust).
+    /// @notice Vault total assets = vault idle balance + strategy total assets, within share conversion rounding.
     function invariant_VaultStrategyValueConsistency() public view {
         uint256 vaultAssets = vault.totalAssets();
-        uint256 strategyAssets = strategy.totalAssets();
+        uint256 expected = weth.balanceOf(address(vault)) + strategy.totalAssets();
 
-        assertGe(vaultAssets + 100, strategyAssets, "Vault cannot account for strategy value");
+        assertApproxEqAbs(vaultAssets, expected, DUST_TOLERANCE, "Vault cannot account for strategy value");
     }
 
     /// @notice System-wide emergency mode consistency.
@@ -236,16 +241,17 @@ contract IntegratedInvariantTest is InvariantBase {
         assertEq(vault.emergencyMode(), strategy.emergencyMode(), "System emergency mode inconsistent");
     }
 
-    /// @notice No value leak through multiple operations.
+    /// @notice Current assets + withdrawals = initial deposit + deposits + simulated yield + measured interest,
+    ///         within rounding. Fees are paid in shares and do not change totalAssets().
     function invariant_NoValueLeak() public view {
-        uint256 totalDeposited = vaultHandler.ghost_totalDeposited() + strategyHandler.ghost_totalInvested();
-        uint256 totalWithdrawn = vaultHandler.ghost_totalWithdrawn() + strategyHandler.ghost_totalDivested();
-        uint256 currentValue = vault.totalAssets();
+        int256 inflows = int256(INITIAL_DEPOSIT + vaultHandler.ghost_totalDeposited() + strategyHandler.ghost_totalInvested() + vaultHandler.ghost_totalYield()) + strategyHandler.ghost_interest();
+        int256 outflows = int256(vaultHandler.ghost_totalWithdrawn() + strategyHandler.ghost_totalDivested());
+        int256 accounted = int256(vault.totalAssets()) + outflows;
 
-        if (totalDeposited > 0) {
-            uint256 expectedMin = (totalDeposited * 85) / 100;
-            assertGe(totalWithdrawn + currentValue + INITIAL_DEPOSIT, expectedMin, "Value leaked from system");
-        }
+        uint256 operations = vaultHandler.ghost_depositCount() + vaultHandler.ghost_withdrawCount() + strategyHandler.ghost_equityOps() + adminHandler.ghost_emergencyModeChanges();
+        uint256 tolerance = DUST_TOLERANCE + operations * AAVE_ROUNDING_PER_OP;
+
+        assertApproxEqAbs(accounted, inflows, tolerance, "Value leaked from system");
     }
 
     /// @notice Protocol fee collection is bounded.
@@ -301,7 +307,8 @@ contract IntegratedInvariantTest is InvariantBase {
                          CALL SUMMARY
     //////////////////////////////////////////////////////////////*/
 
-    function invariant_IntegratedCallSummary() public view {
+    /// @notice Logs handler statistics after each run (Foundry hook, not an invariant).
+    function afterInvariant() public view {
         console2.log("=== Integrated System Stats ===");
         console2.log("\n-- Vault Handler --");
         console2.log("Deposits:", vaultHandler.ghost_depositCount());

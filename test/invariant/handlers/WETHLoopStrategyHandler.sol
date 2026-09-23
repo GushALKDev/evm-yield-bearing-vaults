@@ -31,6 +31,17 @@ contract WETHLoopStrategyHandler is Test {
     uint256 public ghost_lastDebt;
     uint256 public ghost_lastHealthFactor;
 
+    /// @dev Strategy equity expected from deposits, withdrawals and measured interest.
+    uint256 public ghost_expectedEquity;
+    /// @dev Net interest (supply minus borrow) measured across time warps.
+    int256 public ghost_interest;
+    /// @dev Operations that touch Aave, each allowed a few wei of Aave rounding.
+    uint256 public ghost_equityOps;
+
+    uint256 public ghost_emergencyRedeems;
+    uint256 public ghost_maxEmergencyRedeemError;
+    uint256 public ghost_recoveries;
+
     /*//////////////////////////////////////////////////////////////
                                STATE
     //////////////////////////////////////////////////////////////*/
@@ -95,6 +106,9 @@ contract WETHLoopStrategyHandler is Test {
         vm.stopPrank();
 
         ghost_totalInvested += amount;
+        // The vault forwards the whole deposit to the strategy
+        ghost_expectedEquity += amount;
+        ghost_equityOps++;
 
         _updatePositionSnapshot();
     }
@@ -112,9 +126,26 @@ contract WETHLoopStrategyHandler is Test {
         uint256 expectedAssets = vault.previewRedeem(sharesToRedeem);
         if (expectedAssets == 0) return;
 
+        bool inEmergency = vault.emergencyMode();
+        uint256 proportionalShare = sharesToRedeem * _rawEquity() / vault.totalSupply();
+        uint256 vaultIdleBefore = weth.balanceOf(address(vault));
+        uint256 balanceBefore = weth.balanceOf(actor);
+
         vm.startPrank(actor);
         uint256 assets = vault.redeem(sharesToRedeem, actor, actor);
         vm.stopPrank();
+
+        uint256 received = weth.balanceOf(actor) - balanceBefore;
+        if (inEmergency) {
+            uint256 error = received > proportionalShare ? received - proportionalShare : proportionalShare - received;
+            if (error > ghost_maxEmergencyRedeemError) ghost_maxEmergencyRedeemError = error;
+            ghost_emergencyRedeems++;
+        }
+
+        // The vault pays from its idle balance first and pulls the rest from the strategy
+        uint256 pulledFromStrategy = assets - (vaultIdleBefore - weth.balanceOf(address(vault)));
+        ghost_expectedEquity -= pulledFromStrategy;
+        ghost_equityOps++;
 
         ghost_totalDivested += assets;
 
@@ -129,14 +160,63 @@ contract WETHLoopStrategyHandler is Test {
         if (!isHealthy) {
             ghost_healthCheckFailures++;
             ghost_emergencyDivestCount++;
+            ghost_equityOps++;
         }
 
         _updatePositionSnapshot();
     }
 
+    /**
+     * @notice Makes the position unhealthy relative to the thresholds and runs checkHealth(), then restores them.
+     */
+    function triggerEmergency() external {
+        if (vault.emergencyMode()) return;
+        (,,,,, uint256 healthFactor) = aavePool.getUserAccountData(address(strategy));
+        if (healthFactor == type(uint256).max) return;
+
+        uint256 minHealthFactor = strategy.minHealthFactor();
+        uint256 targetHealthFactor = strategy.targetHealthFactor();
+
+        vm.prank(admin);
+        strategy.setHealthFactors(healthFactor + 1, healthFactor + 2);
+        bool isHealthy = strategy.checkHealth();
+        vm.prank(admin);
+        strategy.setHealthFactors(minHealthFactor, targetHealthFactor);
+
+        ghost_healthCheckCalls++;
+        if (!isHealthy) {
+            ghost_healthCheckFailures++;
+            ghost_emergencyDivestCount++;
+            ghost_equityOps++;
+        }
+
+        _updatePositionSnapshot();
+    }
+
+    /**
+     * @notice Admin deactivates emergency mode, which reinvests the idle WETH.
+     */
+    function recover() external {
+        if (!vault.emergencyMode()) return;
+
+        vm.prank(admin);
+        vault.setEmergencyMode(false);
+
+        ghost_recoveries++;
+        ghost_equityOps++;
+        _updatePositionSnapshot();
+    }
+
     function warpTime(uint256 seconds_) external {
         seconds_ = bound(seconds_, 1 hours, 7 days);
+        uint256 equityBefore = strategy.totalAssets();
         vm.warp(block.timestamp + seconds_);
+
+        // Interest is external to the strategy's accounting: record it so equity checks stay exact
+        uint256 equityAfter = strategy.totalAssets();
+        int256 interest = int256(equityAfter) - int256(equityBefore);
+        ghost_interest += interest;
+        ghost_expectedEquity = uint256(int256(ghost_expectedEquity) + interest);
 
         _updatePositionSnapshot();
     }
@@ -144,6 +224,15 @@ contract WETHLoopStrategyHandler is Test {
     /*//////////////////////////////////////////////////////////////
                            HELPER FUNCTIONS
     //////////////////////////////////////////////////////////////*/
+
+    /**
+     * @dev Vault equity from raw balances: vault idle + strategy collateral + strategy idle - strategy debt.
+     */
+    function _rawEquity() internal view returns (uint256) {
+        uint256 assets = weth.balanceOf(address(vault)) + IERC20(aToken).balanceOf(address(strategy)) + weth.balanceOf(address(strategy));
+        uint256 debt = IERC20(debtToken).balanceOf(address(strategy));
+        return assets > debt ? assets - debt : 0;
+    }
 
     function _selectActor(uint256 seed) internal view returns (address) {
         return actors[seed % actors.length];
