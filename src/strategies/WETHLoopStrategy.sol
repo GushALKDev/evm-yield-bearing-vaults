@@ -9,6 +9,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IPool} from "../interfaces/aave/IPool.sol";
 import {Currency, CurrencyLibrary} from "v4-core/src/types/Currency.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 /**
  * @title WETHLoopStrategy
@@ -41,6 +42,15 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
      * @dev 10x leverage means: Collateral = 10 * Principal, Debt = 9 * Principal.
      */
     uint8 public targetLeverage;
+
+    /**
+     * @dev A withdrawal that would leave less equity than this closes the whole position instead.
+     *      Aave values debt rounding up and collateral rounding down in its 8-decimal base currency, so a dust
+     *      position (for example 10,000 wei collateral / 9,000 wei debt) has a health factor of 0 and the
+     *      collateral withdrawal reverts. 1e12 wei keeps the remaining debt at thousands of base units or more
+     *      for any ETH price above 1 USD.
+     */
+    uint256 public constant MIN_REMAINING_EQUITY = 1e12;
 
     /*//////////////////////////////////////////////////////////////
                                  ERRORS
@@ -189,9 +199,23 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
         if (assets > netEquity) revert WithdrawExceedsEquity(assets, netEquity);
 
         // Effects
-        // Calculate proportional amounts directly to avoid precision loss
-        uint256 debtToRepay = (totalDebt * assets) / netEquity;
-        uint256 collateralToWithdraw = (totalCollateral * assets) / netEquity;
+        uint256 debtToRepay;
+        uint256 collateralToWithdraw;
+        // Gas: unchecked safe (assets <= netEquity validated above)
+        uint256 remainingEquity;
+        unchecked {
+            remainingEquity = netEquity - assets;
+        }
+        if (remainingEquity < MIN_REMAINING_EQUITY) {
+            // Close fully; any equity above `assets` stays as idle WETH, counted by totalAssets()
+            debtToRepay = totalDebt;
+            collateralToWithdraw = totalCollateral;
+        } else {
+            // Debt rounds up so the remaining position is never more leveraged than before.
+            // Collateral is derived from it so the remaining equity is exactly netEquity - assets.
+            debtToRepay = Math.mulDiv(totalDebt, assets, netEquity, Math.Rounding.Ceil);
+            collateralToWithdraw = debtToRepay + assets;
+        }
 
         // Interactions
         flashLoan(Currency.wrap(assetAddr), debtToRepay, abi.encode(true, collateralToWithdraw));
