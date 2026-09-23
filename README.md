@@ -5,9 +5,10 @@
 ![Solidity](https://img.shields.io/badge/Solidity-0.8.26-blue)
 ![Foundry](https://img.shields.io/badge/Built%20with-Foundry-orange)
 
-![Tests](https://img.shields.io/badge/Tests-209%20passing-brightgreen)
-![Coverage](https://img.shields.io/badge/Line%20coverage-89.31%25-yellowgreen)
-![Fuzzing](https://img.shields.io/badge/Fuzzing-356%2C608%20runs%20%2B%20calls-blue)
+![Tests](https://img.shields.io/badge/Tests-247%20passing-brightgreen)
+![Coverage](https://img.shields.io/badge/Line%20coverage-91.53%25-brightgreen)
+![Invariants](https://img.shields.io/badge/Invariants-25-blue)
+![Fuzzing](https://img.shields.io/badge/Fuzzing-331%2C008%20runs%20%2B%20calls-blue)
 
 A modular ERC-4626 vault with pluggable strategies. The repository contains a simple Aave V3 supply strategy and a leveraged WETH loop strategy that uses Uniswap V4 flash loans and Aave V3 E-Mode.
 
@@ -15,18 +16,19 @@ A modular ERC-4626 vault with pluggable strategies. The repository contains a si
 
 Proof of concept. Not audited and not deployed.
 
-The repository contains no deployment scripts (`script/` is empty) and no `broadcast/` directory. Several known issues are listed in [Known issues](#known-issues). Do not use this code with real funds.
+The repository contains no deployment scripts (`script/` is empty) and no `broadcast/` directory. A documentation review found four issues and a later test tightening found a fifth; all five are fixed, see [Review notes](#review-notes). Do not use this code with real funds.
 
 ## Overview
 
 - **Vault and strategy split.** `YieldBearingVault` is an ERC-4626 vault that holds shares of a single ERC-4626 strategy. Deposits are forwarded to the strategy in the same transaction. On withdrawal the vault first uses its own idle balance and withdraws only the shortfall from the strategy.
-- **Leveraged WETH loop.** `WETHLoopStrategy` uses a Uniswap V4 flash loan and Aave V3 E-Mode (category 1, "ETH correlated") to build a leveraged WETH position. The tests use 10x. The code accepts any integer `targetLeverage >= 2`; with the E-Mode LTV of 93% observed at the time of testing, Aave accepts a fresh position at 14x and rejects one at 15x.
+- **Leveraged WETH loop.** `WETHLoopStrategy` uses a Uniswap V4 flash loan and Aave V3 E-Mode (category 1, "ETH correlated") to build a leveraged WETH position. The tests use 10x. The code accepts any integer `targetLeverage >= 2`; with the E-Mode LTV of 93% at the pinned fork block, Aave accepts a fresh position at 14x and rejects one at 15x (`LeverageBoundsForkTest`).
 - **Negative carry.** The WETH loop demonstrates the leverage mechanics. Because collateral and debt are the same asset in the same Aave reserve, the loop has negative carry; a positive spread requires yield-bearing collateral such as an LST (see [Roadmap](#roadmap)). See [Economics of the WETH loop](#economics-of-the-weth-loop).
-- **Health check and emergency divest.** `WETHLoopStrategy.checkHealth()` is a permissionless function. When the Aave health factor is below `minHealthFactor`, it activates emergency mode and closes the whole position with a flash loan. It is designed to exit the position before liquidation, but it only runs when someone calls it. The repository does not include a keeper.
+- **Emergency mode.** Activating emergency mode, by the admin or by the health check, blocks deposits and attempts to close the external position. If the close fails, emergency mode stays active and withdrawals deleverage proportionally. Strategy accounting counts idle assets, so withdrawals during emergency mode pay the pro rata share of equity.
+- **Health check.** `WETHLoopStrategy.checkHealth()` is a permissionless function. When the Aave health factor is below `minHealthFactor`, it activates emergency mode. It is designed to exit the position before liquidation, but it only runs when someone calls it. The repository does not include a keeper.
 - **Recovery.** When the vault admin deactivates emergency mode, the strategy reinvests its idle balance at the current `targetLeverage`.
-- **Performance fee with high-water mark.** Performance fees are only charged on gains above the previous high-water mark. Fees are minted as vault shares to the fee recipient.
-- **Permissioned ERC-4626.** The vault implements the ERC-4626 interface on top of OpenZeppelin Contracts v5.5.0. It is permissioned: deposit and mint receivers and share transfer recipients must be whitelisted. Withdrawals and redemptions are not whitelist-gated.
-- **Flash loan provider.** Uniswap V4 charged no flash loan fee at the time of writing. Aave V3's flash loan premium was 0.05% at the time of writing (`FLASHLOAN_PREMIUM_TOTAL = 5` bps at block 26043165). Neither value is fixed.
+- **Performance fee with high-water mark.** Performance fees are only charged on gains above the previous high-water mark. The fee is assessed before each deposit, mint, withdraw and redeem is priced, and is minted as vault shares to the fee recipient.
+- **Permissioned ERC-4626.** The vault implements the ERC-4626 interface on top of OpenZeppelin Contracts (master commit `239795b`, package version 5.5.0). It is permissioned: deposit and mint receivers and share transfer recipients must be whitelisted. Withdrawals and redemptions are not whitelist-gated.
+- **Flash loan provider.** Uniswap V4 charged no flash loan fee at the time of writing. Aave V3's flash loan premium was 0.05% at the time of writing (`FLASHLOAN_PREMIUM_TOTAL = 5` bps at block 26043110). Neither value is fixed.
 
 ## Architecture
 
@@ -63,11 +65,11 @@ The repository contains no deployment scripts (`script/` is empty) and no `broad
 |----------|-------------|
 | `YieldBearingVault` | Concrete vault ("YieldBearingVault", "YBV") built on `BaseVault` |
 | `BaseVault` | Abstract ERC-4626 vault: whitelist, strategy integration, high-water-mark fee, emergency mode, 1,000 wei dead shares |
-| `BaseStrategy` | Abstract ERC-4626 strategy that only accepts deposits from its vault; `_invest()` and `_divest()` hooks |
+| `BaseStrategy` | Abstract ERC-4626 strategy that only accepts deposits from its vault; `_invest()`, `_divest()` and `_exitPosition()` hooks; decimals offset of 6 |
 | `AaveSimpleLendingStrategy` | Supplies the asset to Aave V3, no leverage. `checkHealth()` always returns `true` |
 | `WETHLoopStrategy` | Leveraged WETH strategy using Uniswap V4 flash loans and Aave V3 E-Mode |
 | `AaveAdapter` | Library for Aave V3 supply, withdraw, borrow (variable rate) and repay |
-| `UniswapV4Adapter` | Abstract adapter implementing flash loans through `unlock` / `unlockCallback` |
+| `UniswapV4Adapter` | Abstract adapter implementing flash loans through `unlock` / `unlockCallback`; records the outstanding loan in transient storage |
 | `Whitelist` | `Ownable` whitelist of addresses |
 
 ### Roles
@@ -78,6 +80,7 @@ The repository contains no deployment scripts (`script/` is empty) and no `broad
 | Admin | Vault `admin` (constructor `_admin`) | Vault: `setAdmin`, `setStrategy`, `setEmergencyMode`, `setProtocolFee`, `setFeeRecipient`. Strategy: `setLeverage`, `setHealthFactors`, `harvest` (reverts in both strategies) |
 | Strategy | The vault's current `strategy` | `activateEmergencyMode()` on the vault (activate only) |
 | Vault | The strategy's immutable `VAULT` | Strategy `deposit`, `mint`, `withdraw`, `redeem`, `setEmergencyMode` |
+| Strategy itself | The strategy contract | `exitPosition()` (called from `setEmergencyMode` inside try/catch) |
 | Anyone | Any address | `checkHealth()` on the strategies, `assessPerformanceFee()` on the vault |
 
 ## WETHLoopStrategy flow
@@ -100,33 +103,38 @@ Example with L = 10 and a 1 WETH deposit:
 
 ```
 1. The vault requests Y WETH from the strategy (only the part it cannot pay from its idle balance)
-2. ratio = Y / netEquity, where netEquity = collateral - debt
-3. Strategy flash-borrows totalDebt * ratio WETH from the Uniswap V4 PoolManager
-4. Strategy repays totalDebt * ratio to Aave
-5. Strategy withdraws totalCollateral * ratio from Aave
-6. Strategy repays the flash loan and transfers Y WETH to the vault
-7. Result: position reduced proportionally, leverage ratio unchanged
+2. The strategy pays from its own idle WETH first; N = Y - idle is taken from the position
+3. netEquity = collateral - debt
+4. If netEquity - N < MIN_REMAINING_EQUITY (1e12 wei): repay all debt and withdraw all collateral;
+   the surplus above N stays as idle WETH
+5. Otherwise: debtToRepay = ceil(debt * N / netEquity), collateralToWithdraw = debtToRepay + N
+6. Strategy flash-borrows debtToRepay WETH from the Uniswap V4 PoolManager, repays it to Aave,
+   withdraws collateralToWithdraw and repays the flash loan
+7. Result: remaining equity is exactly netEquity - N and leverage does not increase
 
 Example: 50% withdrawal from 10 WETH collateral / 9 WETH debt:
-- Withdraw 5 WETH collateral | Repay 4.5 WETH debt | Return 0.5 WETH
+- Repay 4.5 WETH debt | Withdraw 5 WETH collateral | Return 0.5 WETH
 ```
 
-If the strategy has no debt it withdraws `Y` directly. If collateral is less than or equal to debt the call reverts with `InsufficientEquity()`.
+If the strategy has no debt it withdraws `N` directly. If collateral is less than or equal to debt the call reverts with `InsufficientEquity()`.
 
 ### Emergency divest
 
 ```
-1. Anyone calls checkHealth(); Aave reports healthFactor < minHealthFactor
-2. Strategy calls vault.activateEmergencyMode(), which also sets the strategy's emergency flag
-3. Strategy flash-borrows totalDebt WETH from the Uniswap V4 PoolManager
-4. Strategy repays all debt to Aave
-5. Strategy withdraws all collateral from Aave
-6. Strategy repays the flash loan; the remaining WETH stays in the strategy
-7. The call reverts with EmergencyDivestFailed() if any debt remains
-8. Emergency mode is active: vault and strategy deposits and mints revert
+1. Emergency mode is activated in one of two ways:
+   a. Anyone calls checkHealth(); Aave reports healthFactor < minHealthFactor;
+      the strategy calls vault.activateEmergencyMode()
+   b. The admin calls vault.setEmergencyMode(true)
+2. The vault sets its flag and calls strategy.setEmergencyMode(true)
+3. The strategy sets its flag and calls exitPosition() inside try/catch:
+   flash-borrows the total debt, repays it, withdraws all collateral, repays the flash loan,
+   and reverts with EmergencyDivestFailed() if any debt remains
+4. On success, the WETH stays in the strategy as idle equity, counted by totalAssets()
+5. On failure, EmergencyExitFailed(reason) is emitted, emergency mode stays active and the position
+   stays open; calling setEmergencyMode(true) or checkHealth() again retries the exit
+6. While emergency mode is active: vault and strategy deposits and mints revert;
+   withdrawals pay from idle WETH, or deleverage proportionally if the position is still open
 ```
-
-If any step reverts (for example, not enough WETH in the PoolManager), the whole transaction reverts, including the activation of emergency mode.
 
 ### Recovery
 
@@ -137,8 +145,6 @@ If any step reverts (for example, not enough WETH in the PoolManager), the whole
 4. The position is rebuilt at the current targetLeverage
 5. Deposits are accepted again
 ```
-
-Emergency mode set by the admin with `setEmergencyMode(true)` does not close the position. See [Known issues](#known-issues).
 
 ## Economics of the WETH loop
 
@@ -169,7 +175,7 @@ ROE = 10 * 0.68 * r - 9 * r = 6.8r - 9r = -2.2r
 r = 2.5%  ->  ROE = -5.5% per year
 ```
 
-With the WETH reserve rates observed on mainnet at block 26043094 (supply 1.41%, variable borrow 2.02%), the same formula gives about -4.1% per year at 10x.
+With the WETH reserve rates at the pinned block 26043110 (supply 1.41%, variable borrow 2.02%), the same formula gives about -4.1% per year at 10x.
 
 Consequence for the health factor. Debt grows at `r` and collateral grows at `s < r`, so the health factor drifts down over time even if prices do not move. Collateral and debt are both WETH, so a WETH price move does not change the health factor; interest accrual and changes to Aave's risk parameters do.
 
@@ -180,122 +186,182 @@ HF(t) ~ HF_0 * exp(-(r - s) * t)
 t     = ln(HF_0 / HF_min) / (r - s)      (time until HF reaches HF_min)
 ```
 
-With the E-Mode liquidation threshold observed at the time of testing (`LT = 95%`):
+With the E-Mode liquidation threshold at the pinned block (`LT = 95%`, checked by `LeverageBoundsForkTest`):
 
-- `L = 10`: `HF_0 = 10 * 0.95 / 9 = 1.0556`. A 10x position opened on a mainnet fork during review reported `1.055555555554728178`.
-- `L = 14`: `HF_0 = 14 * 0.95 / 13 = 1.0231` (fork: `1.023076923076359553`), close to the `minHealthFactor` of 1.02 used in the tests.
+- `L = 10`: `HF_0 = 10 * 0.95 / 9 = 1.0556`.
+- `L = 14`: `HF_0 = 14 * 0.95 / 13 = 1.0231`, close to the `minHealthFactor` of 1.02 used in the tests.
 
-Illustrative drift at 10x with `minHealthFactor = 1.02`: with `r - s = 0.8` percentage points (the example above), HF reaches 1.02 after about 4.3 years and 1.00 after about 6.8 years. A sustained spread of 5 percentage points (for example during a utilization spike) reaches 1.02 in about 8 months. This is why the emergency divest path, and someone calling `checkHealth()` in time, matters.
+Illustrative drift at 10x with `minHealthFactor = 1.02`: with `r - s = 0.8` percentage points (the example above), HF reaches 1.02 after about 4.3 years and 1.00 after about 6.8 years. With the rates at the pinned block (`r - s = 0.61` points), HF reaches 1.02 after about 5.6 years. A sustained spread of 5 percentage points (for example during a utilization spike) reaches 1.02 in about 8 months. This is why the emergency divest path, and someone calling `checkHealth()` in time, matters.
+
+The reserve rates can be read at the pinned block with the command below. The third field is the supply (liquidity) rate and the fifth the variable borrow rate, both in ray (1e27 = 100%).
+
+```bash
+cast call 0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2 "getReserveData(address)((uint256,uint128,uint128,uint128,uint128,uint128,uint40,uint16,address,address,address,address,uint128,uint128,uint128))" 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2 --block 26043110 --rpc-url $ETHEREUM_MAINNET_RPC
+```
 
 ## Trust assumptions and limitations
 
 - **Admin powers.** The admin can:
-  - replace the strategy at any time with `setStrategy()`. The new strategy receives an unlimited allowance of the vault asset, receives all future deposits, and funds in the old strategy are not migrated and stop being counted in `totalAssets()`;
+  - replace the strategy at any time with `setStrategy()`. The new strategy receives an unlimited allowance of the vault asset and all future deposits; funds in the old strategy are not migrated and stop being counted in `totalAssets()`;
   - set the protocol fee (up to 2,500 bps, 25%) and the fee recipient;
-  - activate or deactivate emergency mode. Deactivation triggers an automatic reinvestment of the strategy's idle balance at the current leverage;
+  - activate emergency mode, which closes the external position, or deactivate it, which reinvests the strategy's idle balance at the current leverage;
   - change `targetLeverage` (any integer >= 2, no upper bound in code) and the health factor thresholds (any `min < target`, no bounds). Raising `minHealthFactor` above the current health factor lets anyone trigger an emergency divest; the tests use this to simulate an unhealthy position;
   - transfer the admin role with `setAdmin()`.
   There is no timelock.
 - **Owner powers.** The owner controls the whitelist and can transfer or renounce ownership. Renouncing freezes the whitelist.
 - **Keeper liveness.** `checkHealth()` is permissionless, but the repository does not include a keeper, bot or script that calls it. If nobody calls it in time, the emergency divest does not happen and the position can be liquidated.
-- **Flash loan liquidity.** Investment, proportional divestment and emergency divest all flash-borrow WETH from the Uniswap V4 PoolManager. The emergency divest borrows the full debt. At block 26043094 the PoolManager held about 1,012 WETH, which at 10x limits a single deposit to about 112 WETH and a closable position to about 112 WETH of equity. The fork tests `deal` 10,000 WETH to the PoolManager in `setUp`, so they do not reflect real liquidity.
-- **Aave parameters.** LTV (93%), liquidation threshold (95%) and E-Mode category 1 parameters were read at the time of testing. They are set by Aave governance and can change; a lower liquidation threshold lowers the health factor of an existing position immediately.
+- **Best-effort exit.** The exit runs inside try/catch so that emergency mode can always be activated. A caller of `checkHealth()` can supply just enough gas for the outer call to succeed while the exit runs out of gas; the result is emergency mode with the position still open (deposits blocked, withdrawals deleverage proportionally). Calling `checkHealth()` again retries the exit.
+- **Flash loan liquidity.** Investment, proportional divestment and the emergency exit all flash-borrow WETH from the Uniswap V4 PoolManager. The exit borrows the full debt. At block 26043110 the PoolManager held about 1,004.7 WETH, which at 10x limits a single deposit to about 111.6 WETH and a position the exit can close to about 111.6 WETH of equity. Some older fork tests `deal` 10,000 WETH to the PoolManager; the regression tests, the gas benchmark and `LeverageBoundsForkTest` use its real balance.
+- **Aave parameters.** LTV (93%), liquidation threshold (95%) and E-Mode category 1 parameters are the values at block 26043110. They are set by Aave governance and can change; a lower liquidation threshold lowers the health factor of an existing position immediately.
 - **Negative carry.** The WETH loop loses value over time at typical rates; see [Economics of the WETH loop](#economics-of-the-weth-loop).
 - **No rebalancing.** Leverage is only applied when assets are invested. `setLeverage()` affects future deposits and reinvestments, not the existing position. `targetHealthFactor` is stored and validated but not used by any logic. `harvest()` reverts in both strategies.
+- **Dust exits.** A withdrawal that would leave less than `MIN_REMAINING_EQUITY` (1e12 wei) in the position closes the whole position; the remaining equity stays as idle WETH until the next deposit supplies it again.
 - **ERC-4626 limits.** `maxDeposit()` and `maxMint()` are not overridden and return `type(uint256).max` even for non-whitelisted receivers and during emergency mode.
 - **Whitelist scope.** The whitelist is checked on the deposit or mint receiver (not the caller) and on the recipient of share transfers. Performance fee shares are minted to the fee recipient without a whitelist check. Addresses removed from the whitelist keep their shares and can still withdraw and transfer to whitelisted addresses.
 - **High-water mark details.** The high-water mark is an aggregate asset amount, not a per-share price. It increases by deposited assets, decreases by withdrawn assets, and is raised to `totalAssets()` when fees are assessed with a non-zero rate and a recipient set. While the fee is 0 or no recipient is set, it is not raised, so enabling the fee later charges it on gains accrued before.
-- **Dead shares.** The 1,000 wei initial deposit raises the cost of a first-depositor share inflation attack; it does not eliminate it. There is no decimals offset.
+- **Share inflation.** The vault's 1,000 wei dead shares raise the cost of a first-depositor inflation attack on vault shares; they do not eliminate it, and the vault has no decimals offset. The strategies use a decimals offset of 6: strategy shares are only held by the vault, so the vault's dead shares do not protect strategy share pricing, and counting idle assets would otherwise let a donation to an empty strategy round the vault's strategy shares to zero. With the offset, a 1 WETH donation before a 1 WETH first deposit leaves the depositor at least 99.9999% of the deposit (`test_Donation_BeforeFirstDeposit_DoesNotDiluteDepositor`); rounding a deposit down to zero strategy shares would require a donation of about 1e6 times the deposit.
 - **Not audited.**
 
-## Known issues
+## Review notes
 
-Found while verifying this document against the code. They are documented here and not fixed in this revision.
+Issues found while reviewing the documentation against the code (1 to 4) and while tightening the invariants (5). Each has a regression test that failed before the fix; mock and fork variants share one abstract test contract.
 
-1. **Idle WETH is not counted after an emergency divest.** `WETHLoopStrategy.totalAssets()` returns `aToken balance - debt` and does not include WETH held by the strategy. After an emergency divest the strategy holds the recovered WETH but reports close to 0 assets, so the vault's `totalAssets()` drops accordingly. On a mainnet fork, a user who deposited 1 WETH and redeemed all shares during emergency mode received 1,000 wei (paid from the vault's idle initial deposit), while about 1 WETH stayed in the strategy. `test_EmergencyMode_WithdrawalsSkipDivest` passes because its `setUp` sends 100 WETH directly to the vault, so the redemption is paid from that balance within a 2% tolerance. `invariant_TotalAssetsCalculation` expects idle WETH to be included, and passes because no idle WETH accumulates during the invariant runs.
-2. **Admin-activated emergency mode blocks withdrawals.** `BaseStrategy._withdraw()` skips `_divest()` whenever emergency mode is active, on the assumption that the position was already closed. When the admin activates emergency mode directly, the position is still open, so withdrawals that need funds from the strategy revert. Observed on a fork for both `WETHLoopStrategy` and `AaveSimpleLendingStrategy`.
-3. **Full exit through the vault can revert.** On a mainnet fork, a single depositor redeeming all vault shares from a 10x position reverted with Aave's `HealthFactorLowerThanLiquidationThreshold()`. The vault pays part of the amount from its idle balance (the 1,000 wei initial deposit), so the strategy is asked for slightly less than its full equity; the proportional repayment then leaves dust debt against dust collateral, which Aave rejects. Redeeming 50% succeeded. `test_Divest_FullWithdrawal` calls `strategy.redeem()` directly with all strategy shares and does not cover this path.
-4. **`forge test --gas-report` fails.** With `--gas-report`, 15 suites revert in `setUp()` with `ERC20InsufficientAllowance`. Gas reports run tests in isolation mode, where the deployer's nonce no longer matches the one passed to `vm.computeCreateAddress`, so the initial deposit is approved for the wrong vault address.
+| # | Issue | Fix commit | Regression tests |
+|---|-------|------------|------------------|
+| 1 | Idle WETH not counted after an emergency divest | `93d043b` | `EmergencyAccountingMockTest`, `EmergencyAccountingForkTest` |
+| 2 | Admin-activated emergency mode blocked withdrawals | `4291057` | `EmergencyActivationMockTest`, `EmergencyActivationForkTest` |
+| 3 | Full exit through the vault reverted | `3af50b4` | `FullExitMockTest`, `FullExitForkTest`, `GasBenchmarkForkTest.test_Gas_Redeem` |
+| 4 | `forge test --gas-report` failed in `setUp()` | `65b3bd9` | `forge test --gas-report` |
+| 5 | Performance fee assessed after pricing | `162cfea` | `PerformanceFeeTimingTest`, `invariant_ConversionReversibility` |
+
+1. **Idle WETH not counted.** Root cause: `WETHLoopStrategy.totalAssets()` returned `aToken - debt`, but an emergency divest leaves the equity as WETH in the strategy, so the strategy reported about 0 assets. A user who deposited 1 WETH and redeemed during emergency mode received 1,000 wei (the vault's initial deposit). `AaveSimpleLendingStrategy.totalAssets()` had the same pattern. Fix: `totalAssets()` returns `collateral + idle WETH - debt - outstanding flash loan` (the adapter records the loan in a transient slot during `unlockCallback`, so borrowed WETH never counts as equity); `AaveSimpleLendingStrategy` adds idle assets; both `_divest()` implementations pay from idle assets first; `BaseStrategy` sets a decimals offset of 6 against donations to an empty strategy (see [Trust assumptions and limitations](#trust-assumptions-and-limitations)).
+2. **Admin emergency blocked withdrawals.** Root cause: `BaseStrategy._withdraw()` skipped `_divest()` in emergency mode on the assumption that the position was already closed, which only held after a health-check divest. With `setEmergencyMode(true)` from the admin, the position stayed open and every withdrawal that needed strategy funds reverted, in both strategies. Fix: every activation calls `exitPosition()` inside try/catch (WETH loop: close the position; Aave simple: withdraw the supply); `_withdraw()` always calls `_divest()`, which pays from idle assets and otherwise deleverages proportionally. Design choice: activation must never be blocked (it is the circuit breaker), so a failed exit leaves emergency mode active and emits `EmergencyExitFailed`, and withdrawals still work.
+3. **Full exit reverted.** Root cause: the vault pays part of a redemption from its idle balance, so the last depositor's redemption asked the strategy for slightly less than its equity. The proportional deleverage left about 10,000 wei of collateral against 9,000 wei of debt. Aave values debt rounding up and collateral rounding down in its 8-decimal base currency; at block 26043110 that dust position had `debtBase = 1` and `collateralBase = 0`, so the collateral withdrawal reverted with `HealthFactorLowerThanLiquidationThreshold()`. Fix: a withdrawal that would leave less than `MIN_REMAINING_EQUITY` (1e12 wei) closes the whole position; otherwise debt repayment rounds up and the collateral withdrawn is `debtRepaid + assets`, so the remaining equity is exact and leverage does not increase. With debt rounded up, rounding collateral down as well could pay the user 1 wei less than the `assets` that ERC-4626 requires, so the collateral amount is derived instead.
+4. **Gas report failed.** Root cause: gas reports run in isolation mode, where each pranked call is a transaction that bumps the sender's nonce, so the vault address predicted with `vm.computeCreateAddress` for the initial-deposit approval was wrong. Fix: tests approve a deployed `VaultDeployer` helper, which pulls the initial deposit and deploys the vault with CREATE2.
+5. **Fee assessed after pricing.** Root cause: the fee was assessed inside `_deposit`/`_withdraw`, after ERC-4626 had priced the operation. An exiting user was paid the pre-fee share price (skipping the fee) and the fee shares then diluted the remaining holders; a depositor entering after a profit paid the pre-fee price. In the test, a user redeeming after a 10 WETH profit on 100 WETH with a 10% fee received 110 WETH instead of 109. Fix: `deposit`, `mint`, `withdraw` and `redeem` assess the fee before calling the ERC-4626 implementation, and fee shares are priced against assets net of the fee, so they are worth the fee amount after minting.
 
 ## Security considerations
 
 | Topic | Implementation |
 |-------|----------------|
-| Share inflation | The constructor requires exactly 1,000 wei (`REQUIRED_INITIAL_DEPOSIT`), pulls it from the deployer and mints 1,000 shares to `0x...dEaD`. Mitigates first-depositor inflation; does not eliminate it |
-| Reentrancy | OpenZeppelin `ReentrancyGuard` (`nonReentrant`) on vault `deposit`, `mint`, `withdraw`, `redeem` and `assessPerformanceFee`. Strategy entry points have no guard and are restricted to the vault with `onlyVault` |
-| Flash loan callback | `unlockCallback()` reverts unless called by the PoolManager; repayment is checked against the value returned by `settle()` |
+| Share inflation | The vault constructor requires exactly 1,000 wei (`REQUIRED_INITIAL_DEPOSIT`) and mints 1,000 shares to `0x...dEaD`. Strategies use a decimals offset of 6. Both mitigate inflation attacks; neither eliminates them |
+| Reentrancy | OpenZeppelin `ReentrancyGuard` (`nonReentrant`) on vault `deposit`, `mint`, `withdraw`, `redeem` and `assessPerformanceFee`, checked by `ReentrancyTest` with a callback token. Strategy entry points have no guard and are restricted to the vault with `onlyVault` |
+| Flash loan callback | `unlockCallback()` reverts unless called by the PoolManager; repayment is checked against the value returned by `settle()`; the outstanding loan is excluded from `totalAssets()` while the callback runs |
 | Strategy share checks | The vault compares the strategy shares minted or burned with `previewDeposit` / `previewWithdraw` and reverts on a worse result |
-| Emergency mode | Blocks vault and strategy deposits and mints. The flag does not block withdrawals, but see [Known issues](#known-issues) 1 and 2 |
-| Health check | Permissionless `checkHealth()`; closes the position when the health factor is below `minHealthFactor`. Designed to exit before liquidation, depends on someone calling it |
+| Emergency mode | Blocks vault and strategy deposits and mints and attempts to close the external position; withdrawals pay from idle assets or deleverage proportionally |
+| Health check | Permissionless `checkHealth()`; activates emergency mode when the health factor is below `minHealthFactor`. Designed to exit before liquidation, depends on someone calling it |
 | Recovery | Admin deactivation of emergency mode reinvests the strategy's idle balance |
-| Access control | Owner manages the whitelist; admin manages configuration; the strategy can activate but not deactivate emergency mode |
-| Performance fee | Charged only on gains above the high-water mark; capped at 25% by `MAX_PROTOCOL_FEE_BPS` |
-| Emergency withdrawals | The strategy skips `_divest()` during emergency mode on the assumption that the position is already closed. This holds after an emergency divest, not after admin activation ([Known issues](#known-issues) 2) |
+| Access control | Owner manages the whitelist; admin manages configuration; the strategy can activate but not deactivate emergency mode; `exitPosition()` only accepts calls from the strategy itself |
+| Performance fee | Assessed before each deposit, mint, withdraw and redeem is priced; charged only on gains above the high-water mark; capped at 25% by `MAX_PROTOCOL_FEE_BPS` |
+| Rounding | Proportional deleverage rounds debt repayment up; withdrawals that would leave dust close the position |
 
 ## Installation
 
-This project uses [Foundry](https://book.getfoundry.sh/). `lib/` is not tracked and `foundry.lock` does not list OpenZeppelin, so a plain `forge install` after cloning installs nothing. Install the dependencies explicitly:
+This project uses [Foundry](https://book.getfoundry.sh/). Dependencies are git submodules, pinned in `foundry.lock`:
+
+| Submodule | Version |
+|-----------|---------|
+| `lib/forge-std` | v1.14.0 (`1801b05`) |
+| `lib/openzeppelin-contracts` | master commit `239795b` (package version 5.5.0, not a tagged release) |
+| `lib/v4-core` | v4.0.0 (`e50237c`) |
 
 ```bash
-git clone https://github.com/GushALKDev/evm-yield-bearing-vaults.git
-cd evm-yield-bearing-vaults
-
-forge install --no-git foundry-rs/forge-std@v1.14.0 Uniswap/v4-core@v4.0.0 OpenZeppelin/openzeppelin-contracts@v5.5.0
-
-cp .env_example .env
-# Set ETHEREUM_MAINNET_RPC=https://... in .env (needed only for fork tests)
+git clone --recursive https://github.com/GushALKDev/evm-yield-bearing-vaults.git
 ```
+
+```bash
+cd evm-yield-bearing-vaults
+```
+
+If you cloned without `--recursive`:
+
+```bash
+git submodule update --init --recursive
+```
+
+Fork tests need an Ethereum mainnet RPC that serves historical state (archive access for block 26043110):
+
+```bash
+cp .env_example .env
+```
+
+Then set `ETHEREUM_MAINNET_RPC=https://...` in `.env`.
 
 ## Usage
 
 ```bash
-# Build
 forge build
+```
 
-# All tests (fork suites need ETHEREUM_MAINNET_RPC)
+All tests (fork suites need `ETHEREUM_MAINNET_RPC`):
+
+```bash
 forge test
+```
 
-# Only the tests that do not need an RPC (unit, BaseVaultFuzz, invariants in mock mode)
-forge test --no-match-path "test/{integration/*,fuzz/*StrategyFuzz.t.sol}"
+Mock mode, only the tests that do not need an RPC:
 
-# Coverage
+```bash
+forge test --no-match-path "test/{integration/*,fuzz/*StrategyFuzz.t.sol,gas/GasBenchmarkFork.t.sol}"
+```
+
+Coverage:
+
+```bash
 forge coverage --no-match-coverage "(test|script|mock)"
 ```
 
-Fork tests fork the latest mainnet block (no pinned block number), so results depend on the chain state at run time.
+Gas report for the whole suite:
+
+```bash
+forge test --gas-report
+```
+
+Fork tests fork Ethereum mainnet at block 26043110 by default (`test/utils/ForkConfig.sol`). Override it with `FORK_BLOCK`, or set `FORK_BLOCK=0` to fork the latest block. Results at other blocks can differ from the numbers in this document.
+
+```bash
+FORK_BLOCK=0 forge test --match-path "test/integration/*"
+```
+
+Invariant suites against the fork (add `--threads 1` if the RPC provider rate-limits parallel requests):
+
+```bash
+INVARIANT_USE_FORK=true FOUNDRY_PROFILE=fork-invariant forge test --match-path "test/invariant/*.sol" --threads 1
+```
 
 ## Testing
 
-Results below were obtained on commit `b15658e` with Forge 1.7.1, running the fork suites against Ethereum mainnet (September 2026).
+Results below were obtained on commit `48144c3` with Forge 1.7.1, fork suites at block 26043110.
 
 ### Test statistics
 
-| Category | Tests | Needs RPC | Iterations |
-|----------|-------|-----------|------------|
-| Unit | 100 | No | - |
-| Integration (fork) | 39 | Yes | - |
-| Stateless fuzzing | 43 (15 mock, 28 fork) | For 28 of them | 43 x 256 runs = 11,008 |
-| Stateful fuzzing (invariants) | 27 (24 invariants + 3 call-summary loggers) | No (mock mode) | 27 x 256 runs x 50 depth = 345,600 handler calls |
-| **Total** | **209, all passing** | | **356,608 fuzz runs and handler calls** |
+| Category | Location | Tests | Needs RPC | Iterations |
+|----------|----------|-------|-----------|------------|
+| Unit (mocks) | `test/unit` | 114 | No | - |
+| Integration (fork) | `test/integration` | 55 | Yes | - |
+| Stateless fuzzing | `test/fuzz` | 43 (15 mock, 28 fork) | For 28 of them | 43 x 256 runs = 11,008 |
+| Stateful fuzzing (invariants) | `test/invariant` | 25 | No (mock mode) | 25 x 256 runs x 50 depth = 320,000 handler calls |
+| Gas benchmark | `test/gas` | 10 (5 mock, 5 fork) | For 5 of them | - |
+| **Total** | | **247, all passing** | | **331,008 fuzz runs and handler calls** |
 
-The 16 tests in `test/unit/AdapterErrorPaths.t.sol` do not import or call the adapter code; they are placeholder and arithmetic assertions. Without `ETHEREUM_MAINNET_RPC`, `forge test` runs 142 tests and the 6 fork suites fail in `setUp()`.
+Mock mode runs 159 of them (114 unit, 15 fuzz, 25 invariants, 5 gas). Without `ETHEREUM_MAINNET_RPC`, plain `forge test` fails in `setUp()` for the fork suites; use the mock mode command above.
 
-Fork mode for the invariant suites (`INVARIANT_USE_FORK=true FOUNDRY_PROFILE=fork-invariant`) uses 20 runs x 10 depth. In the review run the default parallel execution hit the RPC provider's rate limit (HTTP 429); with `--threads 1`, all 18 fork-mode invariant functions in `WETHLoopStrategyInvariant` and `IntegratedInvariant` passed.
+Fork mode for the invariant suites uses 20 runs x 10 depth; all 25 invariant functions passed with `--threads 1`.
 
 ### Coverage
 
-`forge coverage --no-match-coverage "(test|script|mock)"`, all 209 tests:
+`forge coverage --no-match-coverage "(test|script|mock)"`, all 247 tests:
 
 | File | Lines | Statements | Branches | Functions |
 |------|-------|------------|----------|-----------|
 | `access/Whitelist.sol` | 25.81% (8/31) | 24.14% (7/29) | 28.57% (2/7) | 33.33% (2/6) |
-| `adapters/AaveAdapter.sol` | 100.00% (15/15) | 82.35% (14/17) | 25.00% (1/4) | 100.00% (4/4) |
-| `adapters/UniswapV4Adapter.sol` | 100.00% (16/16) | 94.44% (17/18) | 50.00% (1/2) | 100.00% (3/3) |
-| `base/BaseStrategy.sol` | 97.44% (38/39) | 90.91% (30/33) | 83.33% (5/6) | 100.00% (15/15) |
-| `base/BaseVault.sol` | 100.00% (110/110) | 95.83% (115/120) | 80.77% (21/26) | 100.00% (23/23) |
-| `strategies/AaveSimpleLendingStrategy.sol` | 100.00% (14/14) | 90.91% (10/11) | 0.00% (0/1) | 100.00% (6/6) |
-| `strategies/WETHLoopStrategy.sol` | 89.25% (83/93) | 78.81% (93/118) | 34.62% (9/26) | 92.31% (12/13) |
-| **Total** | **89.31% (284/318)** | **82.66% (286/346)** | **54.17% (39/72)** | **92.86% (65/70)** |
+| `adapters/AaveAdapter.sol` | 100.00% (15/15) | 100.00% (17/17) | 100.00% (4/4) | 100.00% (4/4) |
+| `adapters/UniswapV4Adapter.sol` | 100.00% (24/24) | 100.00% (24/24) | 100.00% (2/2) | 100.00% (5/5) |
+| `base/BaseStrategy.sol` | 97.92% (47/48) | 88.89% (32/36) | 80.00% (8/10) | 100.00% (18/18) |
+| `base/BaseVault.sol` | 100.00% (112/112) | 95.90% (117/122) | 80.77% (21/26) | 100.00% (23/23) |
+| `strategies/AaveSimpleLendingStrategy.sol` | 100.00% (22/22) | 96.00% (24/25) | 66.67% (2/3) | 100.00% (7/7) |
+| `strategies/WETHLoopStrategy.sol` | 94.12% (96/102) | 83.21% (109/131) | 41.38% (12/29) | 100.00% (13/13) |
+| **Total** | **91.53% (324/354)** | **85.94% (330/384)** | **62.96% (51/81)** | **94.74% (72/76)** |
 
 ### Stateless fuzzing
 
@@ -304,34 +370,33 @@ Fork mode for the invariant suites (`INVARIANT_USE_FORK=true FOUNDRY_PROFILE=for
 | Suite | Tests | Mode | Focus |
 |-------|-------|------|-------|
 | `BaseVaultFuzz` | 15 | Mock | Deposits (1 wei to 1,000,000 tokens), withdrawals, fees (0 to 2,500 bps), emergency mode, conversions |
-| `WETHLoopStrategyFuzz` | 13 | Fork | Deposits (0.1 to 5 WETH), leverage targets 5x to 10x, withdrawals 10% to 90%, `minHealthFactor` 1.01 to 1.05, emergency trigger and recovery |
+| `WETHLoopStrategyFuzz` | 13 | Fork | Deposits (0.1 to 5 WETH), leverage targets 5x to 10x, withdrawals 10% to 90%, `minHealthFactor` 1.01 to 1.05, emergency divest and recovery |
 | `AaveSimpleStrategyFuzz` | 15 | Fork | Deposits (100 to 100,000 USDC), 2 to 5 users, yield over 1 to 30 days, conversions |
 
 ### Stateful fuzzing (invariants)
 
-27 invariant functions with the handler pattern, 256 runs x 50 depth each (`[invariant]` in `foundry.toml`). Each invariant function runs its own campaign of 12,800 handler calls.
+25 invariant functions with the handler pattern, 256 runs x 50 depth each (`[invariant]` in `foundry.toml`). Handler statistics are logged by `afterInvariant()` hooks, which are not counted as invariants.
 
-| Suite | Invariants | Handlers | Protocols in mock mode |
-|-------|------------|----------|------------------------|
-| `BaseVaultInvariant` | 8 + call summary | `BaseVaultHandler`, `AdminHandler` | `MockStrategy` (always mock) |
-| `WETHLoopStrategyInvariant` | 8 + call summary | `WETHLoopStrategyHandler` | `MockAavePool`, `MockPoolManager`, `MockWETH` |
-| `IntegratedInvariant` | 8 + call summary | All three | Same as above |
+| Suite | Invariants | Handlers |
+|-------|------------|----------|
+| `BaseVaultInvariant` | 8 | `BaseVaultHandler` (deposit, withdraw, transfer, assessFee, simulateYield), `AdminHandler` |
+| `WETHLoopStrategyInvariant` | 9 | `WETHLoopStrategyHandler` (deposit, withdraw, checkHealth, triggerEmergency, recover, warpTime) |
+| `IntegratedInvariant` | 8 | All three |
 
-What the main invariants check, as written in the tests:
+What the main invariants check:
 
-- Total supply equals the sum of the 5 actors' shares, the dead shares and the fee recipient's shares.
-- The dead address holds exactly 1,000 shares.
+- Total supply equals the sum of the actors', dead and fee recipient shares; the dead address holds exactly 1,000 shares.
 - `convertToShares(convertToAssets(x))` returns `x` within 10 wei.
-- Vault and strategy emergency flags are equal.
-- Vault `totalAssets()` equals its idle balance plus strategy assets within 10 wei (`BaseVaultInvariant`), and is at least the strategy's `totalAssets()` minus 100 wei (`IntegratedInvariant`).
-- Every actor holding shares is whitelisted. The admin handler only removes addresses with a zero balance.
-- High-water mark `<= totalAssets() * 1.1 + 1,000`.
-- Protocol fee `<= 2,500` bps.
-- Leverage `collateral / (collateral - debt) <= 14.00x` while a position exists. With a 93% LTV the theoretical upper bound is `1 / (1 - 0.93) = 14.29x`, so the invariant checks that leverage never exceeds what the LTV allows, while the strategy targets 10x in these suites.
-- Health factor `>= minHealthFactor - 0.01` unless emergency mode is active.
-- Value accounting is checked with loose lower bounds: withdrawn plus current assets must be at least 85% (integrated) or 90% minus 1 WETH (strategy) of the deposited amount.
+- The high-water mark equals a model of its definition in `BaseVault` (deposits added, withdrawals subtracted, raised to `totalAssets()` on fee assessment) and stays at most 10 wei above `totalAssets()` (the suite has no loss source).
+- Strategy `totalAssets()` equals `aToken + idle WETH - debt` exactly.
+- Strategy equity equals the equity expected from deposits, withdrawals and interest measured on each time warp, within 4 wei per Aave operation.
+- During emergency mode, a redeeming user receives the pro rata share of raw equity within 2 wei, and the position has no debt.
+- Vault `totalAssets() + withdrawals = initial deposit + deposits + simulated yield + measured interest`, within rounding.
+- Vault `totalAssets()` equals its idle balance plus the strategy's `totalAssets()` within 10 wei.
+- Leverage `collateral / (collateral - debt) <= 14.00x`. With a 93% LTV the theoretical upper bound is `1 / (1 - 0.93) = 14.29x`, so the invariant checks that leverage never exceeds what the LTV allows, while the strategy targets 10x.
+- Health factor `>= minHealthFactor - 0.01` unless emergency mode is active; emergency flags of vault and strategy are equal; every actor holding shares is whitelisted; protocol fee `<= 2,500` bps.
 
-Mock mode limitations: `MockAavePool` does not accrue interest and does not enforce the LTV on borrow, so leverage stays at the configured 10x and the health factor stays at `10 * 0.95 / 9 = 1.0556`. The leverage and health factor invariants are therefore not stressed in mock mode, and `checkHealth()` never triggers an emergency divest there. In `IntegratedInvariant`, the admin handler toggles emergency mode without closing the position, and handler reverts are tolerated because `fail_on_revert = false` (about 12% of handler calls reverted in the review run).
+Mock mode limitations: `MockAavePool` does not accrue interest and does not enforce the LTV on borrow, so leverage stays at the configured 10x and the health factor stays at `10 * 0.95 / 9`. Emergency mode is reached through `triggerEmergency()` (which raises `minHealthFactor` above the current health factor) and the admin handler.
 
 See [test/README.md](test/README.md) for the per-test breakdown.
 
@@ -347,31 +412,39 @@ See [test/README.md](test/README.md) for the per-test breakdown.
 - Batch whitelist functions (`addBatchToWhitelist`, `removeBatchFromWhitelist`).
 - Modifiers delegate to internal functions to reduce bytecode size.
 - Custom errors instead of revert strings.
+- The outstanding flash loan is kept in transient storage.
 
 The repository does not contain before and after measurements for these changes.
 
 ### Measured costs
 
-Because the repository's own `forge test --gas-report` fails ([Known issues](#known-issues) 4), these figures come from a separate measurement harness that is not part of the repository. It deploys the same contracts with the same parameters as the tests (10x leverage, `minHealthFactor` 1.02, `targetHealthFactor` 1.05, E-Mode 1), makes an initial 1 WETH deposit, and runs one scenario per `forge test --gas-report` invocation. Values are the gas reported by `--gas-report`, which runs each call as a separate transaction. Commit `b15658e`.
+From the committed harness in `test/gas/`, commit `48144c3`, reproducible with:
+
+```bash
+forge test --match-contract GasBenchmarkMockTest --gas-report
+```
+
+```bash
+forge test --match-contract GasBenchmarkForkTest --gas-report
+```
+
+`setUp` opens a 1 WETH position at 10x (`minHealthFactor` 1.02, E-Mode 1) with `vault.mint`, so each measured function below is called once per scenario. Values are the gas reported by `--gas-report`, which runs each call as a separate transaction. The fork column runs against Aave V3 and the Uniswap V4 PoolManager at block 26043110 with the PoolManager's real WETH balance.
 
 | Function | Scenario | Mock mode | Mainnet fork |
 |----------|----------|-----------|--------------|
-| `vault.deposit` | 1 WETH, first deposit, empty position | 360,248 | 494,319 |
-| `vault.deposit` | 1 WETH into an existing position | 262,250 | 392,887 |
-| `vault.mint` | Shares for 1 WETH into an existing position | 262,284 | 392,941 |
-| `vault.withdraw` | 0.5 WETH from a 1 WETH position | 255,422 | 391,627 |
-| `vault.redeem` | 50% of the shares of a 1 WETH position | 249,841 | 379,201 |
-| `strategy.checkHealth` | Healthy, no action | 45,582 | 115,560 |
-| `strategy.checkHealth` | Emergency divest of 10 WETH collateral / 9 WETH debt | 214,407 | 344,198 |
-| `vault.setEmergencyMode(false)` | Recovery, reinvest about 1 WETH at 10x | 218,405 | 311,106 |
+| `vault.deposit` | 1 WETH into an existing 10x position | 265,815 | 397,199 |
+| `vault.withdraw` | 0.5 WETH from a 1 WETH position | 260,672 | 397,902 |
+| `vault.redeem` | All shares of the only depositor (position closed) | 253,422 | 359,469 |
+| `strategy.checkHealth` | Emergency divest of 10 WETH collateral / 9 WETH debt | 215,082 | 345,042 |
+| `vault.setEmergencyMode(false)` | Recovery, reinvest about 1 WETH at 10x | 218,615 | 311,368 |
 
-Mock mode uses `MockAavePool`, `MockPoolManager` and `MockWETH`, whose gas costs are not representative of the real protocols. The fork column was measured against Ethereum mainnet around block 26043110.
+Mock mode uses `MockAavePool`, `MockPoolManager` and `MockWETH`, whose gas costs are not representative of the real protocols.
 
 ## Tech stack
 
 - Solidity 0.8.26, EVM version Cancun, optimizer 200 runs
 - Foundry (Forge 1.7.1 used for the results above)
-- OpenZeppelin Contracts v5.5.0
+- OpenZeppelin Contracts (master commit `239795b`, package version 5.5.0)
 - Uniswap V4 Core v4.0.0
 - Aave V3 (mainnet deployment, accessed through a local `IPool` interface)
 
@@ -382,21 +455,21 @@ Mock mode uses `MockAavePool`, `MockPoolManager` and `MockWETH`, whose gas costs
 - [x] Leveraged loop strategy (WETH)
 - [x] Proportional deleveraging
 - [x] Performance fee with high-water mark
-- [x] Emergency mode circuit breaker
+- [x] Emergency mode circuit breaker with position exit
 - [x] Permissionless health check with emergency divest
 - [x] Automatic reinvestment on emergency recovery
-- [x] Test suite (209 tests, 89.31% line coverage)
+- [x] Fixes for the review findings (see [Review notes](#review-notes))
+- [x] Test suite (247 tests, 91.53% line coverage)
 - [x] Stateless fuzzing (43 tests, 11,008 runs)
-- [x] Stateful fuzzing (27 invariant functions, 345,600 handler calls)
-- [x] Gas optimizations (storage packing, caching, unchecked math)
-- [ ] Fix the [known issues](#known-issues)
+- [x] Stateful fuzzing (25 invariant functions, 320,000 handler calls)
+- [x] Gas benchmark harness (mock and fork)
 - [ ] Keeper for `checkHealth()`
 - [ ] Loop strategies with yield-bearing collateral (stETH, rETH, cbETH)
 - [ ] Multi-asset vaults
 
 ## License
 
-MIT, as declared in the SPDX headers. The repository does not include a LICENSE file.
+MIT, see [LICENSE](LICENSE).
 
 ---
 
