@@ -46,6 +46,9 @@ abstract contract BaseStrategy is ERC4626 {
 
     event EmergencyModeSet(bool isOpen);
     event LeverageSet(uint8 newLeverage);
+    /**
+     * @dev minHealth is the trip threshold of checkHealth(); targetHealth is the re-arm threshold of reinvest().
+     */
     event HealthFactorsSet(uint256 minHealth, uint256 targetHealth);
     event EmergencyExitFailed(bytes reason);
 

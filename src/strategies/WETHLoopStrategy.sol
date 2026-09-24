@@ -35,7 +35,14 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
     address public immutable AAVE_POOL;
     address public immutable A_TOKEN;
     address public immutable VARIABLE_DEBT_TOKEN;
+    /**
+     * @dev Trip threshold: checkHealth() activates emergency mode below it, and every investment must stay at or above it.
+     */
     uint256 public minHealthFactor;
+
+    /**
+     * @dev Re-arm threshold: reinvest() reverts unless the position ends at or above it. Not used by deposits.
+     */
     uint256 public targetHealthFactor;
 
     /**
@@ -153,6 +160,9 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
         emit LeverageSet(_targetLeverage);
     }
 
+    /**
+     * @notice Sets the trip threshold (minHealthFactor) and the reinvest() re-arm threshold (targetHealthFactor).
+     */
     function setHealthFactors(uint256 _min, uint256 _target) external onlyVaultAdmin {
         if (_min <= HEALTH_FACTOR_FLOOR || _min >= _target) revert InvalidHealthFactors(_min, _target);
         minHealthFactor = _min;
