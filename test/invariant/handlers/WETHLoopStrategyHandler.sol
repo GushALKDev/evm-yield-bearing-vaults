@@ -42,6 +42,12 @@ contract WETHLoopStrategyHandler is Test {
     uint256 public ghost_maxEmergencyRedeemError;
     uint256 public ghost_recoveries;
 
+    /// @dev Deposits that reverted with HealthFactorBelowMinimum.
+    uint256 public ghost_healthFactorReverts;
+    /// @dev Deposits that reverted with HealthFactorBelowMinimum although maxDeposit() was not 0.
+    uint256 public ghost_maxDepositOverstated;
+    uint256 public ghost_minHealthFactorChanges;
+
     /*//////////////////////////////////////////////////////////////
                                STATE
     //////////////////////////////////////////////////////////////*/
@@ -99,11 +105,20 @@ contract WETHLoopStrategyHandler is Test {
         amount = bound(amount, MIN_DEPOSIT, MAX_DEPOSIT);
 
         deal(address(weth), actor, amount);
+        bool limitOpen = vault.maxDeposit(actor) > 0;
 
         vm.startPrank(actor);
         weth.approve(address(vault), amount);
-        vault.deposit(amount, actor);
-        vm.stopPrank();
+        try vault.deposit(amount, actor) {
+            vm.stopPrank();
+        } catch (bytes memory reason) {
+            vm.stopPrank();
+            if (bytes4(reason) == WETHLoopStrategy.HealthFactorBelowMinimum.selector) {
+                ghost_healthFactorReverts++;
+                if (limitOpen) ghost_maxDepositOverstated++;
+            }
+            return;
+        }
 
         ghost_totalInvested += amount;
         // The vault forwards the whole deposit to the strategy
@@ -212,6 +227,20 @@ contract WETHLoopStrategyHandler is Test {
         ghost_recoveries++;
         ghost_equityOps++;
         _updatePositionSnapshot();
+    }
+
+    /**
+     * @notice Admin moves minHealthFactor between 1.03 and 1.065, across the 10x health factor (10 * 0.95 / 9 = 1.0556)
+     *         and its 0.1% margin, so deposits run with the limit open, closed by the margin only, and closed with a
+     *         real HealthFactorBelowMinimum revert.
+     */
+    function setMinHealthFactor(uint256 minimum) external {
+        minimum = bound(minimum, 1.03e18, 1.065e18);
+
+        vm.prank(admin);
+        strategy.setHealthFactors(minimum, minimum + 0.01e18);
+
+        ghost_minHealthFactorChanges++;
     }
 
     function warpTime(uint256 seconds_) external {

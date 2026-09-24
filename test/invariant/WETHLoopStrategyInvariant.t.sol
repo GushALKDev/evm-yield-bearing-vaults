@@ -260,6 +260,11 @@ contract WETHLoopStrategyInvariantTest is InvariantBase {
         }
     }
 
+    /// @notice No deposit reverts with HealthFactorBelowMinimum while maxDeposit() reports a non-zero limit.
+    function invariant_MaxDepositNeverOverstated() public view {
+        assertEq(strategyHandler.ghost_maxDepositOverstated(), 0, "maxDeposit was not 0 but a deposit hit the minimum health factor");
+    }
+
     /// @notice Collateral + idle WETH - debt equals the equity expected from deposits, withdrawals and measured interest.
     function invariant_PositionValueConsistency() public view {
         uint256 collateral = IERC20(aToken).balanceOf(address(strategy));
@@ -290,5 +295,8 @@ contract WETHLoopStrategyInvariantTest is InvariantBase {
         console2.log("Emergency Redeems:", strategyHandler.ghost_emergencyRedeems());
         console2.log("Max Emergency Redeem Error:", strategyHandler.ghost_maxEmergencyRedeemError());
         console2.log("Recoveries:", strategyHandler.ghost_recoveries());
+        console2.log("Min Health Factor Changes:", strategyHandler.ghost_minHealthFactorChanges());
+        console2.log("Health Factor Reverts:", strategyHandler.ghost_healthFactorReverts());
+        console2.log("Max Deposit Overstated:", strategyHandler.ghost_maxDepositOverstated());
     }
 }
