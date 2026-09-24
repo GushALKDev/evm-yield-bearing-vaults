@@ -21,6 +21,8 @@ contract AdminHandler is Test {
     uint256 public ghost_feeChanges;
     uint256 public ghost_emergencyModeChanges;
     uint256 public ghost_reinvests;
+    uint256 public ghost_feeRecipientChanges;
+    uint256 public ghost_feeRecipientRemovalAttempts;
     /// @dev Successful reinvests that left the health factor below targetHealthFactor.
     uint256 public ghost_reinvestsBelowTarget;
 
@@ -98,6 +100,31 @@ contract AdminHandler is Test {
         ghost_emergencyModeChanges++;
 
         assert(vault.emergencyMode() == !currentMode);
+    }
+
+    /**
+     * @notice Admin moves the fee to an actor; the call only succeeds for whitelisted actors.
+     */
+    function setFeeRecipient(uint256 userSeed) external {
+        address user = potentialUsers[userSeed % potentialUsers.length];
+
+        vm.prank(admin);
+        vault.setFeeRecipient(user);
+
+        ghost_feeRecipientChanges++;
+    }
+
+    /**
+     * @notice Owner tries to remove the current fee recipient from the whitelist; the call must revert.
+     */
+    function removeFeeRecipient() external {
+        address recipient = vault.feeRecipient();
+        if (recipient == address(0)) return;
+
+        ghost_feeRecipientRemovalAttempts++;
+
+        vm.prank(owner);
+        vault.removeFromWhitelist(recipient);
     }
 
     /**

@@ -71,6 +71,7 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
     error InvalidStrategy();
     error InsufficientStrategyShares(uint256 actual, uint256 expected);
     error InsufficientStrategySharesBurned(uint256 actual, uint256 expected);
+    error FeeRecipientNotRemovable(address account);
 
     /*//////////////////////////////////////////////////////////////
                                CONSTRUCTOR
@@ -201,8 +202,12 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
         emit ProtocolFeeSet(_newFeeBps);
     }
 
+    /**
+     * @dev The recipient receives fee shares, so it must be whitelisted like any other share holder.
+     */
     function setFeeRecipient(address _newRecipient) external onlyAdmin {
         if (_newRecipient == address(0)) revert InvalidRecipient();
+        if (!isWhitelisted[_newRecipient]) revert NotWhitelisted(_newRecipient);
         feeRecipient = _newRecipient;
         emit FeeRecipientSet(_newRecipient);
     }
@@ -395,6 +400,20 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
     function _convertToAssets(uint256 shares, Math.Rounding rounding) internal view virtual override returns (uint256) {
         (uint256 feeShares,,) = _pendingFee();
         return Math.mulDiv(shares, totalAssets() + 1, totalSupply() + feeShares + 10 ** _decimalsOffset(), rounding);
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                          WHITELIST OVERRIDES
+    //////////////////////////////////////////////////////////////*/
+
+    /**
+     * @dev The current fee recipient cannot be removed: later fee shares would be minted to a non-whitelisted
+     *      address. Reverting is the only option that neither breaks that property nor changes the fee silently
+     *      (skipping the mint or clearing the recipient would); the admin first moves the fee to another
+     *      whitelisted address with setFeeRecipient().
+     */
+    function _beforeRemoval(address account) internal view override {
+        if (account == feeRecipient) revert FeeRecipientNotRemovable(account);
     }
 
     /*//////////////////////////////////////////////////////////////

@@ -76,6 +76,7 @@ contract BaseVaultHandler is Test {
         asset.approve(address(vault), amount);
 
         uint256 sharesBefore = vault.balanceOf(actor);
+        uint256 supplyBefore = vault.totalSupply();
         uint256 shares = vault.deposit(amount, actor);
         uint256 sharesAfter = vault.balanceOf(actor);
         vm.stopPrank();
@@ -85,7 +86,9 @@ contract BaseVaultHandler is Test {
         ghost_depositCount++;
         ghost_expectedHwm += amount;
 
-        assert(sharesAfter == sharesBefore + shares);
+        // When the actor is the fee recipient, the deposit also mints the pending fee shares to it before pricing
+        uint256 expectedIncrease = actor == vault.feeRecipient() ? vault.totalSupply() - supplyBefore : shares;
+        assert(sharesAfter == sharesBefore + expectedIncrease);
     }
 
     function withdraw(uint256 actorSeed, uint256 withdrawBps) external {

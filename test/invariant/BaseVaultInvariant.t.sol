@@ -59,6 +59,8 @@ contract BaseVaultInvariantTest is InvariantBase {
         vm.prank(admin);
         vault.setStrategy(strategy);
 
+        vm.prank(owner);
+        vault.addToWhitelist(feeRecipient);
         vm.prank(admin);
         vault.setFeeRecipient(feeRecipient);
 
@@ -145,6 +147,14 @@ contract BaseVaultInvariantTest is InvariantBase {
             if (balance > 0) {
                 assertTrue(vault.isWhitelisted(actor), "Non-whitelisted address holds shares");
             }
+        }
+        // Fee shares, with no exception: the fee recipient holds them and must be whitelisted
+        if (vault.balanceOf(feeRecipient) > 0) {
+            assertTrue(vault.isWhitelisted(feeRecipient), "Non-whitelisted fee recipient holds shares");
+        }
+        address currentRecipient = vault.feeRecipient();
+        if (currentRecipient != address(0)) {
+            assertTrue(vault.isWhitelisted(currentRecipient), "Current fee recipient is not whitelisted");
         }
     }
 

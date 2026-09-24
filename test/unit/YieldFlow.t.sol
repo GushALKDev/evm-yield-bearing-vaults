@@ -242,6 +242,7 @@ contract YieldFlowTest is Test {
         address feeRecipient = makeAddr("feeRecipient");
 
         vm.startPrank(owner);
+        vault.addToWhitelist(feeRecipient);
         vault.setFeeRecipient(feeRecipient);
         vault.setProtocolFee(1000); // 10% performance fee (1000 bps)
         vm.stopPrank();

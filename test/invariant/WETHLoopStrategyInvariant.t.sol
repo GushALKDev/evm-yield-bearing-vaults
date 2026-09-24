@@ -154,6 +154,9 @@ contract WETHLoopStrategyInvariantTest is InvariantBase {
     }
 
     function _configureVault() internal {
+        vm.prank(owner);
+        vault.addToWhitelist(feeRecipient);
+
         vm.startPrank(admin);
         vault.setStrategy(strategy);
         vault.setFeeRecipient(feeRecipient);

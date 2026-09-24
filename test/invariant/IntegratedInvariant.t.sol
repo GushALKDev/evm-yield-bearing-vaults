@@ -156,6 +156,9 @@ contract IntegratedInvariantTest is InvariantBase {
     }
 
     function _configureVault() internal {
+        vm.prank(owner);
+        vault.addToWhitelist(feeRecipient);
+
         vm.startPrank(admin);
         vault.setStrategy(strategy);
         vault.setFeeRecipient(feeRecipient);
@@ -207,12 +210,14 @@ contract IntegratedInvariantTest is InvariantBase {
         strategySelectors[5] = WETHLoopStrategyHandler.recover.selector;
         targetSelector(FuzzSelector({addr: address(strategyHandler), selectors: strategySelectors}));
 
-        bytes4[] memory adminSelectors = new bytes4[](5);
+        bytes4[] memory adminSelectors = new bytes4[](7);
         adminSelectors[0] = AdminHandler.addToWhitelist.selector;
         adminSelectors[1] = AdminHandler.removeFromWhitelist.selector;
         adminSelectors[2] = AdminHandler.setProtocolFee.selector;
         adminSelectors[3] = AdminHandler.toggleEmergencyMode.selector;
         adminSelectors[4] = AdminHandler.reinvest.selector;
+        adminSelectors[5] = AdminHandler.setFeeRecipient.selector;
+        adminSelectors[6] = AdminHandler.removeFeeRecipient.selector;
         targetSelector(FuzzSelector({addr: address(adminHandler), selectors: adminSelectors}));
 
         excludeSender(owner);
@@ -271,6 +276,14 @@ contract IntegratedInvariantTest is InvariantBase {
             if (vault.balanceOf(actors[i]) > 0) {
                 assertTrue(vault.isWhitelisted(actors[i]), "Non-whitelisted holds shares");
             }
+        }
+        // Fee shares, with no exception: the fee recipient holds them and must be whitelisted
+        if (vault.balanceOf(feeRecipient) > 0) {
+            assertTrue(vault.isWhitelisted(feeRecipient), "Non-whitelisted fee recipient holds shares");
+        }
+        address currentRecipient = vault.feeRecipient();
+        if (currentRecipient != address(0)) {
+            assertTrue(vault.isWhitelisted(currentRecipient), "Current fee recipient is not whitelisted");
         }
     }
 

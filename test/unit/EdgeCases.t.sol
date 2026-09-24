@@ -245,6 +245,8 @@ contract EdgeCasesTest is Test {
      */
     function test_PerformanceFee_ZeroFee() public {
         // ============ ARRANGE ============
+        vm.prank(owner);
+        vault.addToWhitelist(feeRecipient);
         vm.prank(admin);
         vault.setFeeRecipient(feeRecipient);
         // protocolFeeBps defaults to 0
@@ -302,6 +304,8 @@ contract EdgeCasesTest is Test {
         // ============ ARRANGE ============
         uint16 maxFee = 2500; // 25%
 
+        vm.prank(owner);
+        vault.addToWhitelist(feeRecipient);
         vm.startPrank(admin);
         vault.setProtocolFee(maxFee);
         vault.setFeeRecipient(feeRecipient);

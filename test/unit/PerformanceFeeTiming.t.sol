@@ -37,6 +37,7 @@ contract PerformanceFeeTimingTest is Test {
         vault = vaultDeployer.deploy(IERC20(address(asset)), owner, admin, INITIAL_DEPOSIT);
         vault.addToWhitelist(alice);
         vault.addToWhitelist(bob);
+        vault.addToWhitelist(feeRecipient);
         vm.stopPrank();
 
         strategy = new MockStrategy(IERC20(address(asset)), address(vault));

@@ -66,6 +66,8 @@ contract BaseVaultFuzzTest is Test {
         vm.prank(admin);
         vault.setStrategy(strategy);
 
+        vm.prank(owner);
+        vault.addToWhitelist(feeRecipient);
         vm.prank(admin);
         vault.setFeeRecipient(feeRecipient);
     }

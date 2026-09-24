@@ -198,6 +198,10 @@ contract BaseVaultTest is Test {
      * @notice Tests that fee recipient can be changed.
      */
     function test_SetFeeRecipient_Success() public {
+        // ============ ARRANGE ============
+        vm.prank(owner);
+        vault.addToWhitelist(feeRecipient);
+
         // ============ ACT ============
         vm.prank(admin);
         vm.expectEmit(true, false, false, false);
