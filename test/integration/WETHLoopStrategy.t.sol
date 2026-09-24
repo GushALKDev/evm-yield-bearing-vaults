@@ -700,14 +700,13 @@ contract WETHLoopStrategyTest is Test {
     }
 
     /**
-     * @notice Tests recovery from emergency mode by reinvesting all funds.
+     * @notice Tests the two-step recovery from emergency mode.
      * @dev Verifies:
-     *      - Admin can deactivate emergency mode
-     *      - Funds are automatically reinvested when emergency mode is deactivated
-     *      - Position is restored with proper leverage
+     *      - Admin can deactivate emergency mode, which leaves the recovered WETH idle
+     *      - Admin reinvest() restores the position with the health factor at or above target
      *      - New deposits are allowed again
      */
-    function test_RecoveryFromEmergency_ReinvestsAutomatically() public {
+    function test_RecoveryFromEmergency_ExitThenReinvest() public {
         // ============ ARRANGE ============
         address user = makeAddr("user");
         uint256 depositAmount = 1 ether;
@@ -747,9 +746,16 @@ contract WETHLoopStrategyTest is Test {
         vm.prank(vaultAdmin);
         YieldBearingVault(vault).setEmergencyMode(false);
 
-        // ============ ASSERT: EMERGENCY MODE DEACTIVATED ============
+        // ============ ASSERT: EMERGENCY MODE DEACTIVATED, NOTHING REINVESTED ============
         assertFalse(YieldBearingVault(vault).emergencyMode(), "Vault emergency mode should be deactivated");
         assertFalse(strategy.emergencyMode(), "Strategy emergency mode should be deactivated");
+        assertEq(weth.balanceOf(address(strategy)), strategyBalanceBeforeRecovery, "Exit should not reinvest");
+
+        // ============ ACT: ADMIN RESTORES THRESHOLDS AND REINVESTS ============
+        vm.startPrank(vaultAdmin);
+        strategy.setHealthFactors(MIN_HEALTH_FACTOR, TARGET_HEALTH_FACTOR);
+        YieldBearingVault(vault).reinvest();
+        vm.stopPrank();
 
         // ============ ASSERT: FUNDS REINVESTED ============
         uint256 strategyBalanceAfterRecovery = weth.balanceOf(address(strategy));
@@ -771,7 +777,7 @@ contract WETHLoopStrategyTest is Test {
         // Verify leverage is restored
         (,,,,, uint256 healthFactorAfterRecovery) = IPool(resolvedPool).getUserAccountData(address(strategy));
         console.log("Health Factor After Recovery:", healthFactorAfterRecovery);
-        assertGe(healthFactorAfterRecovery, MIN_HEALTH_FACTOR, "Health factor should be healthy");
+        assertGe(healthFactorAfterRecovery, TARGET_HEALTH_FACTOR, "Health factor should reach the target");
 
         // ============ ASSERT: NEW DEPOSITS ALLOWED ============
         vm.startPrank(user);

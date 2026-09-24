@@ -403,8 +403,11 @@ contract WETHLoopStrategyFuzzTest is Test {
 
         assertTrue(strategy.emergencyMode(), "Emergency mode should be active");
 
-        vm.prank(vaultAdmin);
+        vm.startPrank(vaultAdmin);
         YieldBearingVault(vault).setEmergencyMode(false);
+        strategy.setHealthFactors(MIN_HEALTH_FACTOR, TARGET_HEALTH_FACTOR);
+        YieldBearingVault(vault).reinvest();
+        vm.stopPrank();
 
         assertFalse(strategy.emergencyMode(), "Emergency mode should be deactivated");
 

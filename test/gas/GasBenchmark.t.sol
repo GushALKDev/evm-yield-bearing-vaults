@@ -117,7 +117,7 @@ abstract contract GasBenchmarkBase is Test {
         strategy.checkHealth();
     }
 
-    /// @notice vault.setEmergencyMode(false) after an emergency divest: reinvests about 1 WETH at 10x.
+    /// @notice vault.setEmergencyMode(false) after an emergency divest, then vault.reinvest of about 1 WETH at 10x.
     function test_Gas_Recovery() public {
         _raiseMinHealthFactor();
         strategy.checkHealth();
@@ -125,6 +125,8 @@ abstract contract GasBenchmarkBase is Test {
         strategy.setHealthFactors(MIN_HEALTH_FACTOR, TARGET_HEALTH_FACTOR);
         vm.prank(admin);
         vault.setEmergencyMode(false);
+        vm.prank(admin);
+        vault.reinvest();
     }
 
     /*//////////////////////////////////////////////////////////////

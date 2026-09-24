@@ -150,7 +150,7 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
     }
 
     /**
-     * @dev Deposits are blocked but withdrawals remain active.
+     * @dev Deposits are blocked but withdrawals remain active. Deactivation does not reinvest, see reinvest().
      */
     function setEmergencyMode(bool _active) external onlyAdmin {
         emergencyMode = _active;
@@ -172,6 +172,15 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
             cachedStrategy.setEmergencyMode(true);
         }
         emit EmergencyModeSet(true);
+    }
+
+    /**
+     * @notice Reinvests the strategy's idle assets, the second step of leaving emergency mode.
+     */
+    function reinvest() external onlyAdmin whenNotEmergency {
+        BaseStrategy cachedStrategy = strategy;
+        if (address(cachedStrategy) == address(0)) revert InvalidStrategy();
+        cachedStrategy.reinvest();
     }
 
     function setProtocolFee(uint16 _newFeeBps) external onlyAdmin {

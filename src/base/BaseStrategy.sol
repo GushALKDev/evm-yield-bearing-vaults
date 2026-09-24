@@ -137,11 +137,11 @@ abstract contract BaseStrategy is ERC4626 {
      * @dev Activation always attempts to close the external position, whoever triggered it (admin or health
      *      check). If the exit reverts, emergency mode stays active, EmergencyExitFailed is emitted and
      *      withdrawals keep working through _divest(). Calling it again with true retries the exit.
-     *      Deactivation reinvests the idle assets.
+     *      Deactivation only clears the flag; idle assets are reinvested in a separate step with reinvest(),
+     *      so leaving emergency mode never depends on the reinvestment succeeding.
      */
     function setEmergencyMode(bool _active) external onlyVault {
         // Effects
-        bool wasInEmergency = emergencyMode;
         emergencyMode = _active;
         emit EmergencyModeSet(_active);
 
@@ -151,9 +151,15 @@ abstract contract BaseStrategy is ERC4626 {
             catch (bytes memory reason) {
                 emit EmergencyExitFailed(reason);
             }
-        } else if (wasInEmergency) {
-            _reinvest();
         }
+    }
+
+    /**
+     * @notice Invests the idle assets into the external protocol.
+     * @dev Second step of leaving emergency mode, called by the vault admin through the vault.
+     */
+    function reinvest() external onlyVault whenNotEmergency {
+        _reinvest();
     }
 
     /**
@@ -166,8 +172,7 @@ abstract contract BaseStrategy is ERC4626 {
     }
 
     /**
-     * @dev Reinvests all available assets after emergency mode is deactivated.
-     *      Strategy balance is invested back into the protocol.
+     * @dev Invests the whole idle balance. Strategies override it to add post-conditions.
      */
     function _reinvest() internal virtual {
         uint256 availableAssets = IERC20(asset()).balanceOf(address(this));

@@ -194,13 +194,15 @@ contract WETHLoopStrategyHandler is Test {
     }
 
     /**
-     * @notice Admin deactivates emergency mode, which reinvests the idle WETH.
+     * @notice Admin deactivates emergency mode and then reinvests the idle WETH.
      */
     function recover() external {
         if (!vault.emergencyMode()) return;
 
-        vm.prank(admin);
+        vm.startPrank(admin);
         vault.setEmergencyMode(false);
+        vault.reinvest();
+        vm.stopPrank();
 
         ghost_recoveries++;
         ghost_equityOps++;

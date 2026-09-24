@@ -66,6 +66,7 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
     error InsufficientAaveWithdrawal(uint256 withdrawn, uint256 requested);
     error InsufficientAaveRepayment(uint256 repaid, uint256 requested);
     error StrategyNotHarvestable();
+    error HealthFactorBelowTarget(uint256 healthFactor, uint256 targetHealthFactor);
 
     /*//////////////////////////////////////////////////////////////
                                CONSTRUCTOR
@@ -139,7 +140,8 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
     //////////////////////////////////////////////////////////////*/
 
     /**
-     * @dev Calculates flash loan amount needed to reach target leverage.
+     * @dev Calculates flash loan amount needed to reach target leverage. Only `assets` is supplied: idle WETH is
+     *      invested by reinvest(), which checks the resulting health factor.
      */
     function _invest(uint256 assets) internal override {
         uint256 principal = assets;
@@ -152,7 +154,7 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
         address assetAddr = asset();
 
         if (flashAmount > 0) {
-            flashLoan(Currency.wrap(assetAddr), flashAmount, bytes(""));
+            flashLoan(Currency.wrap(assetAddr), flashAmount, abi.encode(false, principal));
         } else {
             AaveAdapter.supply(AAVE_POOL, assetAddr, principal);
         }
@@ -227,22 +229,21 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
     function _onFlashLoan(Currency currency, uint256 amount, bytes memory data) internal override {
         address underlying = Currency.unwrap(currency);
 
-        if (data.length == 0) {
-            _onFlashLoanInvest(underlying, amount);
+        // Invest: principal. Divest: collateral to withdraw.
+        (bool isDivest, uint256 param) = abi.decode(data, (bool, uint256));
+        if (isDivest) {
+            _onFlashLoanDivest(underlying, amount, param);
         } else {
-            (bool isDivest, uint256 collateralToWithdraw) = abi.decode(data, (bool, uint256));
-            if (isDivest) {
-                _onFlashLoanDivest(underlying, amount, collateralToWithdraw);
-            }
+            _onFlashLoanInvest(underlying, amount, param);
         }
     }
 
     /**
      * @dev Invests by supplying principal + flash loan to Aave, then borrows to repay flash.
      */
-    function _onFlashLoanInvest(address underlying, uint256 flashAmount) internal {
+    function _onFlashLoanInvest(address underlying, uint256 flashAmount, uint256 principal) internal {
         // Checks
-        uint256 totalToSupply = IERC20(underlying).balanceOf(address(this));
+        uint256 totalToSupply = principal + flashAmount;
 
         // Interactions
         address pool = AAVE_POOL;
@@ -298,6 +299,21 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
         BaseVault(VAULT).activateEmergencyMode();
 
         return false;
+    }
+
+    /**
+     * @dev Re-arms only into a position at or above targetHealthFactor, while checkHealth() trips below
+     *      minHealthFactor. The check covers the whole position; with no debt Aave reports type(uint256).max.
+     */
+    function _reinvest() internal override {
+        // Interactions
+        super._reinvest();
+
+        // Invariants
+        //slither-disable-next-line unused-return
+        (,,,,, uint256 healthFactor) = IPool(AAVE_POOL).getUserAccountData(address(this));
+        uint256 target = targetHealthFactor;
+        if (healthFactor < target) revert HealthFactorBelowTarget(healthFactor, target);
     }
 
     /**

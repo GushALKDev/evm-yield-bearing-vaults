@@ -101,25 +101,6 @@ abstract contract EmergencyActivationTestBase is StrategyTestBase {
         assertEq(IERC20(debtToken).balanceOf(address(strategy)), 0, "Retry should close the position");
     }
 
-    /// @notice Deactivating emergency mode after an admin activation rebuilds the leveraged position.
-    function test_AdminEmergency_RecoveryReinvests() public {
-        // ============ ARRANGE ============
-        (YieldBearingVault vault, WETHLoopStrategy strategy) = _deployWethLoop();
-        _deposit(vault, alice, 1 ether);
-        vm.prank(admin);
-        vault.setEmergencyMode(true);
-        uint256 equity = strategy.totalAssets();
-
-        // ============ ACT ============
-        vm.prank(admin);
-        vault.setEmergencyMode(false);
-
-        // ============ ASSERT ============
-        assertLt(weth.balanceOf(address(strategy)), 100, "Idle WETH should be reinvested");
-        assertApproxEqAbs(IERC20(debtToken).balanceOf(address(strategy)), equity * (TARGET_LEVERAGE - 1), 10, "Debt back at target leverage");
-        assertApproxEqAbs(strategy.totalAssets(), equity, 10, "Reinvesting does not change equity");
-    }
-
     function _setPoolManagerBalance(uint256 amount) internal {
         if (_useFork()) {
             deal(address(weth), poolManager, amount);

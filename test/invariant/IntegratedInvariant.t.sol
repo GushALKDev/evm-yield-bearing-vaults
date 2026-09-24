@@ -182,7 +182,7 @@ contract IntegratedInvariantTest is InvariantBase {
             admin,
             owner
         );
-        adminHandler = new AdminHandler(vault, admin, owner, actors);
+        adminHandler = new AdminHandler(vault, admin, owner, actors, aavePool);
     }
 
     function _configureInvariantTesting() internal {
@@ -207,11 +207,12 @@ contract IntegratedInvariantTest is InvariantBase {
         strategySelectors[5] = WETHLoopStrategyHandler.recover.selector;
         targetSelector(FuzzSelector({addr: address(strategyHandler), selectors: strategySelectors}));
 
-        bytes4[] memory adminSelectors = new bytes4[](4);
+        bytes4[] memory adminSelectors = new bytes4[](5);
         adminSelectors[0] = AdminHandler.addToWhitelist.selector;
         adminSelectors[1] = AdminHandler.removeFromWhitelist.selector;
         adminSelectors[2] = AdminHandler.setProtocolFee.selector;
         adminSelectors[3] = AdminHandler.toggleEmergencyMode.selector;
+        adminSelectors[4] = AdminHandler.reinvest.selector;
         targetSelector(FuzzSelector({addr: address(adminHandler), selectors: adminSelectors}));
 
         excludeSender(owner);
@@ -248,10 +249,15 @@ contract IntegratedInvariantTest is InvariantBase {
         int256 outflows = int256(vaultHandler.ghost_totalWithdrawn() + strategyHandler.ghost_totalDivested());
         int256 accounted = int256(vault.totalAssets()) + outflows;
 
-        uint256 operations = vaultHandler.ghost_depositCount() + vaultHandler.ghost_withdrawCount() + strategyHandler.ghost_equityOps() + adminHandler.ghost_emergencyModeChanges();
+        uint256 operations = vaultHandler.ghost_depositCount() + vaultHandler.ghost_withdrawCount() + strategyHandler.ghost_equityOps() + adminHandler.ghost_emergencyModeChanges() + adminHandler.ghost_reinvests();
         uint256 tolerance = DUST_TOLERANCE + operations * AAVE_ROUNDING_PER_OP;
 
         assertApproxEqAbs(accounted, inflows, tolerance, "Value leaked from system");
+    }
+
+    /// @notice A successful reinvest leaves the health factor at or above targetHealthFactor.
+    function invariant_ReinvestMeetsTargetHealthFactor() public view {
+        assertEq(adminHandler.ghost_reinvestsBelowTarget(), 0, "Reinvest left the health factor below target");
     }
 
     /// @notice Protocol fee collection is bounded.
@@ -325,6 +331,7 @@ contract IntegratedInvariantTest is InvariantBase {
 
         console2.log("\n-- Admin Handler --");
         console2.log("Emergency Mode Changes:", adminHandler.ghost_emergencyModeChanges());
+        console2.log("Reinvests:", adminHandler.ghost_reinvests());
         console2.log("Fee Changes:", adminHandler.ghost_feeChanges());
         console2.log("Whitelist Additions:", adminHandler.ghost_whitelistAdditions());
     }

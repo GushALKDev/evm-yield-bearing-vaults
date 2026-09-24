@@ -5,6 +5,7 @@ import {console2} from "forge-std/console2.sol";
 import {InvariantBase} from "./InvariantBase.sol";
 import {BaseVaultHandler} from "./handlers/BaseVaultHandler.sol";
 import {AdminHandler} from "./handlers/AdminHandler.sol";
+import {IPool} from "../../src/interfaces/aave/IPool.sol";
 import {YieldBearingVault} from "../../src/vaults/YieldBearingVault.sol";
 import {MockStrategy} from "../mocks/MockStrategy.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
@@ -71,7 +72,7 @@ contract BaseVaultInvariantTest is InvariantBase {
         vm.stopPrank();
 
         vaultHandler = new BaseVaultHandler(vault, IERC20(address(asset)), actors, admin, owner);
-        adminHandler = new AdminHandler(vault, admin, owner, actors);
+        adminHandler = new AdminHandler(vault, admin, owner, actors, IPool(address(0)));
 
         targetContract(address(vaultHandler));
         targetContract(address(adminHandler));
