@@ -52,12 +52,17 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
      */
     uint256 public constant MIN_REMAINING_EQUITY = 1e12;
 
+    /**
+     * @dev Aave liquidates at a health factor below 1e18, so minHealthFactor must be strictly above it.
+     */
+    uint256 public constant HEALTH_FACTOR_FLOOR = 1e18;
+
     /*//////////////////////////////////////////////////////////////
                                  ERRORS
     //////////////////////////////////////////////////////////////*/
 
     error InvalidLeverage();
-    error InvalidHealthFactors();
+    error InvalidHealthFactors(uint256 minHealthFactor, uint256 targetHealthFactor);
     error BorrowedAmountMismatch(uint256 borrowed, uint256 expected);
     error InsufficientEquity();
     error WithdrawExceedsEquity(uint256 requested, uint256 available);
@@ -81,8 +86,8 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
      * @param _aToken The aWETH token address.
      * @param _variableDebtToken The variable debt WETH token address.
      * @param _targetLeverage Target leverage multiplier (minimum 2x).
-     * @param _minHealthFactor Minimum health factor threshold (1e18 scale).
-     * @param _targetHealthFactor Target health factor to maintain (1e18 scale).
+     * @param _minHealthFactor Health factor below which checkHealth() triggers emergency mode (1e18 scale, > 1e18).
+     * @param _targetHealthFactor Minimum health factor after reinvest() (1e18 scale, > _minHealthFactor).
      * @param _eModeCategoryId Aave E-Mode category (1 for ETH-correlated).
      */
     constructor(
@@ -104,7 +109,7 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
         if (_targetLeverage < 2) revert InvalidLeverage();
         targetLeverage = _targetLeverage;
 
-        if (_minHealthFactor >= _targetHealthFactor) revert InvalidHealthFactors();
+        if (_minHealthFactor <= HEALTH_FACTOR_FLOOR || _minHealthFactor >= _targetHealthFactor) revert InvalidHealthFactors(_minHealthFactor, _targetHealthFactor);
         minHealthFactor = _minHealthFactor;
         targetHealthFactor = _targetHealthFactor;
         E_MODE_CATEGORY_ID = _eModeCategoryId;
@@ -123,7 +128,7 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
     }
 
     function setHealthFactors(uint256 _min, uint256 _target) external onlyVaultAdmin {
-        if (_min >= _target) revert InvalidHealthFactors();
+        if (_min <= HEALTH_FACTOR_FLOOR || _min >= _target) revert InvalidHealthFactors(_min, _target);
         minHealthFactor = _min;
         targetHealthFactor = _target;
         emit HealthFactorsSet(_min, _target);
