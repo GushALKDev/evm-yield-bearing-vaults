@@ -170,6 +170,46 @@ abstract contract EmergencyRecoveryTestBase is StrategyTestBase {
         assertEq(IERC20(debtToken).balanceOf(address(strategy)), 0, "No position should be opened");
     }
 
+    /// @notice Idle WETH below MIN_INVEST_ASSETS stays idle on reinvest() instead of opening a dust position.
+    function test_Reinvest_DustIdleStaysIdle() public {
+        // ============ ARRANGE ============
+        (YieldBearingVault vault, WETHLoopStrategy strategy) = _deployWethLoop();
+        _fund(address(strategy), 1000);
+
+        // ============ ACT ============
+        vm.prank(admin);
+        vault.reinvest();
+
+        // ============ ASSERT ============
+        assertEq(weth.balanceOf(address(strategy)), 1000, "Dust should stay idle");
+        assertEq(IERC20(aToken).balanceOf(address(strategy)), 0, "No collateral should be supplied");
+        assertEq(IERC20(debtToken).balanceOf(address(strategy)), 0, "No debt should be taken");
+    }
+
+    /// @notice A deposit below MIN_INVEST_ASSETS stays idle and is invested by reinvest() once idle reaches the bound.
+    function test_Deposit_DustStaysIdleUntilReinvest() public {
+        // ============ ARRANGE ============
+        (YieldBearingVault vault, WETHLoopStrategy strategy) = _deployWethLoop();
+        uint256 dust = strategy.MIN_INVEST_ASSETS() - 1;
+
+        // ============ ACT: DUST DEPOSIT ============
+        _deposit(vault, alice, dust);
+
+        // ============ ASSERT: IDLE ============
+        assertEq(weth.balanceOf(address(strategy)), dust, "Dust deposit should stay idle");
+        assertEq(IERC20(debtToken).balanceOf(address(strategy)), 0, "No position should be opened");
+        assertApproxEqAbs(strategy.totalAssets(), dust, 1, "Idle dust is counted by totalAssets()");
+
+        // ============ ACT: IDLE REACHES THE BOUND ============
+        _fund(address(strategy), 1);
+        vm.prank(admin);
+        vault.reinvest();
+
+        // ============ ASSERT: INVESTED ============
+        assertEq(weth.balanceOf(address(strategy)), 0, "Idle WETH should be reinvested");
+        assertGt(IERC20(debtToken).balanceOf(address(strategy)), 0, "Position should be opened");
+    }
+
     function _setPoolManagerBalance(uint256 amount) internal {
         if (_useFork()) {
             deal(address(weth), poolManager, amount);

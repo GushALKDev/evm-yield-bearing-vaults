@@ -53,6 +53,13 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
     uint256 public constant MIN_REMAINING_EQUITY = 1e12;
 
     /**
+     * @dev Smaller amounts are not invested and stay as idle WETH: counted by totalAssets(), paid out first on
+     *      withdrawals and invested by reinvest() once the idle balance reaches this bound. Same rounding reason as
+     *      MIN_REMAINING_EQUITY: without an existing position, investing 1,000 wei at 10x reverts in Aave.
+     */
+    uint256 public constant MIN_INVEST_ASSETS = MIN_REMAINING_EQUITY;
+
+    /**
      * @dev Aave liquidates at a health factor below 1e18, so minHealthFactor must be strictly above it.
      */
     uint256 public constant HEALTH_FACTOR_FLOOR = 1e18;
@@ -149,8 +156,12 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
      * @dev Calculates flash loan amount needed to reach target leverage. Only `assets` is supplied: idle WETH is
      *      invested by reinvest(), which checks the resulting health factor. Reverts if the position ends below
      *      minHealthFactor, so a deposit never opens a position that checkHealth() would close right away.
+     *      Amounts below MIN_INVEST_ASSETS stay idle.
      */
     function _invest(uint256 assets) internal override {
+        // Checks
+        if (assets < MIN_INVEST_ASSETS) return;
+
         uint256 principal = assets;
         // Gas: unchecked safe, overflow impossible (principal bounded by token supply, leverage max 255)
         uint256 flashAmount;
