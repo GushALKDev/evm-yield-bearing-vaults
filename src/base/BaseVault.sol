@@ -205,14 +205,15 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
 
     /**
      * @dev The performance fee is assessed before ERC4626 prices the operation, so shares and assets are
-     *      converted at the post-fee share price. Same for mint, withdraw and redeem.
+     *      converted at the post-fee share price. Same for mint, withdraw and redeem. Emergency mode and the
+     *      whitelist are checked first so their errors take precedence over ERC4626's maxDeposit/maxMint check.
      */
-    function deposit(uint256 assets, address receiver) public virtual override nonReentrant returns (uint256) {
+    function deposit(uint256 assets, address receiver) public virtual override nonReentrant whenNotEmergency onlyWhitelisted(receiver) returns (uint256) {
         _assessPerformanceFee();
         return super.deposit(assets, receiver);
     }
 
-    function mint(uint256 shares, address receiver) public virtual override nonReentrant returns (uint256) {
+    function mint(uint256 shares, address receiver) public virtual override nonReentrant whenNotEmergency onlyWhitelisted(receiver) returns (uint256) {
         _assessPerformanceFee();
         return super.mint(shares, receiver);
     }
@@ -239,16 +240,30 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
         return localBalance + strategyBalance;
     }
 
+    /**
+     * @dev 0 while emergency mode is active or for receivers that are not whitelisted, since deposit() reverts.
+     */
+    function maxDeposit(address receiver) public view virtual override returns (uint256) {
+        if (emergencyMode || !isWhitelisted[receiver]) return 0;
+        return super.maxDeposit(receiver);
+    }
+
+    /**
+     * @dev 0 while emergency mode is active or for receivers that are not whitelisted, since mint() reverts.
+     */
+    function maxMint(address receiver) public view virtual override returns (uint256) {
+        if (emergencyMode || !isWhitelisted[receiver]) return 0;
+        return super.maxMint(receiver);
+    }
+
     /*//////////////////////////////////////////////////////////////
                             INTERNAL HOOKS
     //////////////////////////////////////////////////////////////*/
 
     /**
-     * @dev Enforces whitelist, updates HWM, and pushes funds to strategy. Fees are assessed by the entry points.
+     * @dev Updates HWM and pushes funds to strategy. Emergency mode, whitelist and fees are handled by the entry points.
      */
-    function _deposit(address caller, address receiver, uint256 assets, uint256 shares) internal virtual override whenNotEmergency {
-        if (!isWhitelisted[receiver]) revert NotWhitelisted(receiver);
-
+    function _deposit(address caller, address receiver, uint256 assets, uint256 shares) internal virtual override {
         super._deposit(caller, receiver, assets, shares);
 
         // Gas: unchecked safe, overflow impossible (HWM bounded by total token supply << uint256.max)

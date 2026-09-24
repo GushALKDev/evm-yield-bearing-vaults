@@ -322,6 +322,76 @@ contract BaseVaultTest is Test {
     }
 
     /*//////////////////////////////////////////////////////////////
+                         ERC-4626 LIMIT TESTS
+    //////////////////////////////////////////////////////////////*/
+
+    /**
+     * @notice Tests that maxDeposit is 0 during emergency mode and unlimited again after it.
+     */
+    function test_MaxDeposit_ZeroDuringEmergency() public {
+        // ============ ARRANGE ============
+        vm.prank(owner);
+        vault.addToWhitelist(alice);
+        assertEq(vault.maxDeposit(alice), type(uint256).max, "Whitelisted receiver should be unlimited");
+
+        // ============ ACT ============
+        vm.prank(admin);
+        vault.setEmergencyMode(true);
+
+        // ============ ASSERT ============
+        assertEq(vault.maxDeposit(alice), 0, "maxDeposit should be 0 during emergency");
+
+        vm.prank(admin);
+        vault.setEmergencyMode(false);
+        assertEq(vault.maxDeposit(alice), type(uint256).max, "maxDeposit should be unlimited after emergency");
+    }
+
+    /**
+     * @notice Tests that maxMint is 0 during emergency mode and unlimited again after it.
+     */
+    function test_MaxMint_ZeroDuringEmergency() public {
+        // ============ ARRANGE ============
+        vm.prank(owner);
+        vault.addToWhitelist(alice);
+        assertEq(vault.maxMint(alice), type(uint256).max, "Whitelisted receiver should be unlimited");
+
+        // ============ ACT ============
+        vm.prank(admin);
+        vault.setEmergencyMode(true);
+
+        // ============ ASSERT ============
+        assertEq(vault.maxMint(alice), 0, "maxMint should be 0 during emergency");
+
+        vm.prank(admin);
+        vault.setEmergencyMode(false);
+        assertEq(vault.maxMint(alice), type(uint256).max, "maxMint should be unlimited after emergency");
+    }
+
+    /**
+     * @notice Tests that maxDeposit is 0 for a receiver that is not whitelisted.
+     */
+    function test_MaxDeposit_ZeroForNonWhitelisted() public {
+        // ============ ASSERT ============
+        assertEq(vault.maxDeposit(alice), 0, "maxDeposit should be 0 for a non-whitelisted receiver");
+
+        vm.prank(owner);
+        vault.addToWhitelist(alice);
+        assertEq(vault.maxDeposit(alice), type(uint256).max, "maxDeposit should be unlimited once whitelisted");
+    }
+
+    /**
+     * @notice Tests that maxMint is 0 for a receiver that is not whitelisted.
+     */
+    function test_MaxMint_ZeroForNonWhitelisted() public {
+        // ============ ASSERT ============
+        assertEq(vault.maxMint(alice), 0, "maxMint should be 0 for a non-whitelisted receiver");
+
+        vm.prank(owner);
+        vault.addToWhitelist(alice);
+        assertEq(vault.maxMint(alice), type(uint256).max, "maxMint should be unlimited once whitelisted");
+    }
+
+    /*//////////////////////////////////////////////////////////////
                         CONSTRUCTOR TESTS
     //////////////////////////////////////////////////////////////*/
 
