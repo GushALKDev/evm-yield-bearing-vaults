@@ -93,7 +93,9 @@ abstract contract Whitelist is Ownable {
                 isWhitelisted[account] = true;
                 emit WhitelistedAdded(account);
             }
-            unchecked { ++i; }
+            unchecked {
+                ++i;
+            }
         }
     }
 
@@ -109,7 +111,9 @@ abstract contract Whitelist is Ownable {
                 isWhitelisted[account] = false;
                 emit WhitelistedRemoved(account);
             }
-            unchecked { ++i; }
+            unchecked {
+                ++i;
+            }
         }
     }
 }

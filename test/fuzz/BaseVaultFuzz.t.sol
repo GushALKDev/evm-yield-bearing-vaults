@@ -23,7 +23,6 @@ contract MockERC20 is ERC20 {
  * @dev Tests vault operations with randomized inputs to discover edge cases.
  */
 contract BaseVaultFuzzTest is Test {
-
     /*//////////////////////////////////////////////////////////////
                                STATE
     //////////////////////////////////////////////////////////////*/
@@ -434,11 +433,7 @@ contract BaseVaultFuzzTest is Test {
             vm.stopPrank();
         }
 
-        assertEq(
-            vault.totalSupply(),
-            vault.balanceOf(user) + vault.balanceOf(DEAD_ADDRESS),
-            "Total supply should equal user + dead shares"
-        );
+        assertEq(vault.totalSupply(), vault.balanceOf(user) + vault.balanceOf(DEAD_ADDRESS), "Total supply should equal user + dead shares");
     }
 
     /**
@@ -462,11 +457,6 @@ contract BaseVaultFuzzTest is Test {
         uint256 vaultAssets = vault.totalAssets();
         uint256 strategyAssets = strategy.totalAssets();
 
-        assertApproxEqAbs(
-            vaultAssets,
-            strategyAssets + INITIAL_DEPOSIT,
-            10,
-            "Vault assets should equal strategy assets + buffer"
-        );
+        assertApproxEqAbs(vaultAssets, strategyAssets + INITIAL_DEPOSIT, 10, "Vault assets should equal strategy assets + buffer");
     }
 }

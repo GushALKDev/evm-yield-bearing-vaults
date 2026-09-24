@@ -23,7 +23,6 @@ contract MockERC20 is ERC20 {
  * @dev Tests whitelist enforcement on deposits, transfers, mints, and redemptions.
  */
 contract WhitelistTest is Test {
-
     /*//////////////////////////////////////////////////////////////
                                STATE
     //////////////////////////////////////////////////////////////*/

@@ -146,19 +146,13 @@ contract AaveSimpleStrategyForkTest is Test {
 
         // ============ ASSERT: SHARE OWNERSHIP INVARIANTS ============
         // Vault shares = Alice + Dead
-        assertEq(
-            vault.totalSupply(),
-            vault.balanceOf(alice) + vault.balanceOf(DEAD_ADDRESS),
-            "Vault Total Supply Invariant"
-        );
+        assertEq(vault.totalSupply(), vault.balanceOf(alice) + vault.balanceOf(DEAD_ADDRESS), "Vault Total Supply Invariant");
         // Strategy shares = Vault's holdings
         assertEq(strategy.totalSupply(), strategy.balanceOf(address(vault)), "Strategy Total Supply Invariant");
 
         // ============ ASSERT: MANAGED ASSETS INVARIANT ============
         // Vault assets = Strategy assets + Buffer
-        assertApproxEqAbs(
-            vault.totalAssets(), strategy.totalAssets() + REQUIRED_DEPOSIT, 2, "Vault vs Strategy Assets Invariant"
-        );
+        assertApproxEqAbs(vault.totalAssets(), strategy.totalAssets() + REQUIRED_DEPOSIT, 2, "Vault vs Strategy Assets Invariant");
 
         _logState("Deposit");
     }
@@ -201,11 +195,7 @@ contract AaveSimpleStrategyForkTest is Test {
 
         // ============ ASSERT: ALICE BALANCE ============
         // Alice should have: Initial - Deposit + Withdrawn
-        assertEq(
-            usdc.balanceOf(alice),
-            ALICE_INITIAL_BALANCE - DEPOSIT_AMOUNT + withdrawAmount,
-            "Alice should have correct USDC balance"
-        );
+        assertEq(usdc.balanceOf(alice), ALICE_INITIAL_BALANCE - DEPOSIT_AMOUNT + withdrawAmount, "Alice should have correct USDC balance");
 
         // ============ ASSERT: ALICE SHARES (PROFIT RETENTION) ============
         // Alice keeps more shares than half due to yield
@@ -216,11 +206,7 @@ contract AaveSimpleStrategyForkTest is Test {
         assertEq(usdc.balanceOf(address(vault)), 0, "Vault should hold 0 underlying (buffer used)");
         assertEq(usdc.balanceOf(address(strategy)), 0, "Strategy should hold 0 underlying");
 
-        assertEq(
-            vault.totalSupply(),
-            vault.balanceOf(alice) + vault.balanceOf(DEAD_ADDRESS),
-            "Vault Total Supply Invariant"
-        );
+        assertEq(vault.totalSupply(), vault.balanceOf(alice) + vault.balanceOf(DEAD_ADDRESS), "Vault Total Supply Invariant");
         assertEq(strategy.totalSupply(), strategy.balanceOf(address(vault)), "Strategy Total Supply Invariant");
 
         assertApproxEqAbs(vault.totalAssets(), strategy.totalAssets(), 1, "Vault vs Strategy Assets Invariant");
@@ -269,11 +255,7 @@ contract AaveSimpleStrategyForkTest is Test {
         uint256 aliceBalance = usdc.balanceOf(alice);
 
         // Alice should receive more than just principal back
-        assertGt(
-            aliceBalance,
-            ALICE_INITIAL_BALANCE - DEPOSIT_AMOUNT + expectedPrincipal,
-            "Alice should receive principal + yield"
-        );
+        assertGt(aliceBalance, ALICE_INITIAL_BALANCE - DEPOSIT_AMOUNT + expectedPrincipal, "Alice should receive principal + yield");
 
         // ============ ASSERT: REMAINING SHARES ============
         // Alice should have exactly half her shares remaining
@@ -283,11 +265,7 @@ contract AaveSimpleStrategyForkTest is Test {
         assertEq(usdc.balanceOf(address(vault)), 0, "Vault should hold 0 underlying (buffer used)");
         assertEq(usdc.balanceOf(address(strategy)), 0, "Strategy should hold 0 underlying");
 
-        assertEq(
-            vault.totalSupply(),
-            vault.balanceOf(alice) + vault.balanceOf(DEAD_ADDRESS),
-            "Vault Total Supply Invariant"
-        );
+        assertEq(vault.totalSupply(), vault.balanceOf(alice) + vault.balanceOf(DEAD_ADDRESS), "Vault Total Supply Invariant");
         assertEq(strategy.totalSupply(), strategy.balanceOf(address(vault)), "Strategy Total Supply Invariant");
 
         assertApproxEqAbs(vault.totalAssets(), strategy.totalAssets(), 1, "Vault vs Strategy Assets Invariant");

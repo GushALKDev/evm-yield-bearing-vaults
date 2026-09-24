@@ -23,7 +23,6 @@ contract MockERC20 is ERC20 {
  * @dev Tests admin operations, fee management, emergency circuit breaker, and error paths.
  */
 contract BaseVaultTest is Test {
-
     /*//////////////////////////////////////////////////////////////
                                STATE
     //////////////////////////////////////////////////////////////*/

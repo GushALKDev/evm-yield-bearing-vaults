@@ -86,6 +86,8 @@ contract HealthFactorBoundsTest is StrategyTestBase {
     }
 
     function _deployStrategy(uint256 minHealthFactor, uint256 targetHealthFactor) internal returns (WETHLoopStrategy) {
-        return new WETHLoopStrategy(weth, address(vault), poolManager, aavePool, aToken, debtToken, TARGET_LEVERAGE, minHealthFactor, targetHealthFactor, EMODE_ETH_CORRELATED);
+        return new WETHLoopStrategy(
+            weth, address(vault), poolManager, aavePool, aToken, debtToken, TARGET_LEVERAGE, minHealthFactor, targetHealthFactor, EMODE_ETH_CORRELATED
+        );
     }
 }

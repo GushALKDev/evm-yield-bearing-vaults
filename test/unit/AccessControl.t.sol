@@ -23,7 +23,6 @@ contract MockERC20 is ERC20 {
  * @dev Tests onlyVault, onlyAdmin, and onlyVaultAdmin modifiers.
  */
 contract AccessControlTest is Test {
-
     /*//////////////////////////////////////////////////////////////
                                STATE
     //////////////////////////////////////////////////////////////*/

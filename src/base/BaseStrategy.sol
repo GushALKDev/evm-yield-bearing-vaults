@@ -66,10 +66,7 @@ abstract contract BaseStrategy is ERC4626 {
                               CONSTRUCTOR
     //////////////////////////////////////////////////////////////*/
 
-    constructor(IERC20 _asset, address _vault, string memory _name, string memory _symbol)
-        ERC4626(_asset)
-        ERC20(_name, _symbol)
-    {
+    constructor(IERC20 _asset, address _vault, string memory _name, string memory _symbol) ERC4626(_asset) ERC20(_name, _symbol) {
         VAULT = _vault;
     }
 

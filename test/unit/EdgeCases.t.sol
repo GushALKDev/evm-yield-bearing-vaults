@@ -23,7 +23,6 @@ contract MockERC20 is ERC20 {
  * @dev Tests unusual scenarios and input validation.
  */
 contract EdgeCasesTest is Test {
-
     /*//////////////////////////////////////////////////////////////
                                STATE
     //////////////////////////////////////////////////////////////*/

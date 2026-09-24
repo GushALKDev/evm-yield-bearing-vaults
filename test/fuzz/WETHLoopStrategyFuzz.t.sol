@@ -113,8 +113,7 @@ contract WETHLoopStrategyFuzzTest is Test {
         strategy.deposit(depositAmount, vault);
         vm.stopPrank();
 
-        (uint256 totalCollateralBase, uint256 totalDebtBase,,,, uint256 healthFactor) =
-            IPool(resolvedPool).getUserAccountData(address(strategy));
+        (uint256 totalCollateralBase, uint256 totalDebtBase,,,, uint256 healthFactor) = IPool(resolvedPool).getUserAccountData(address(strategy));
 
         assertGe(healthFactor, MIN_HEALTH_FACTOR, "Health factor must be above minimum");
         assertGt(totalCollateralBase, 0, "Should have collateral");
@@ -175,15 +174,12 @@ contract WETHLoopStrategyFuzzTest is Test {
         customStrategy.deposit(depositAmount, vault);
         vm.stopPrank();
 
-        (uint256 totalCollateralBase, uint256 totalDebtBase,,,, uint256 healthFactor) =
-            IPool(resolvedPool).getUserAccountData(address(customStrategy));
+        (uint256 totalCollateralBase, uint256 totalDebtBase,,,, uint256 healthFactor) = IPool(resolvedPool).getUserAccountData(address(customStrategy));
 
         assertGe(healthFactor, MIN_HEALTH_FACTOR, "Health factor must be above minimum");
 
         uint256 actualLeverage = totalCollateralBase * 100 / (totalCollateralBase - totalDebtBase);
-        assertApproxEqRel(
-            actualLeverage, uint256(leverageTarget) * 100, 0.15e18, "Leverage should match target within 15%"
-        );
+        assertApproxEqRel(actualLeverage, uint256(leverageTarget) * 100, 0.15e18, "Leverage should match target within 15%");
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -204,8 +200,7 @@ contract WETHLoopStrategyFuzzTest is Test {
         strategy.deposit(depositAmount, vault);
         vm.stopPrank();
 
-        (uint256 initialCollateral, uint256 initialDebt,,,,) =
-            IPool(resolvedPool).getUserAccountData(address(strategy));
+        (uint256 initialCollateral, uint256 initialDebt,,,,) = IPool(resolvedPool).getUserAccountData(address(strategy));
 
         uint256 withdrawAmount = (depositAmount * withdrawRatio) / 100;
 
@@ -215,8 +210,7 @@ contract WETHLoopStrategyFuzzTest is Test {
 
         uint256 receivedAmount = weth.balanceOf(vault) - vaultBalanceBefore;
 
-        (uint256 finalCollateral, uint256 finalDebt,,,, uint256 finalHealthFactor) =
-            IPool(resolvedPool).getUserAccountData(address(strategy));
+        (uint256 finalCollateral, uint256 finalDebt,,,, uint256 finalHealthFactor) = IPool(resolvedPool).getUserAccountData(address(strategy));
 
         assertApproxEqAbs(receivedAmount, withdrawAmount, 100, "Should receive withdrawal amount");
         assertGe(finalHealthFactor, MIN_HEALTH_FACTOR, "Health factor should remain healthy");
@@ -261,9 +255,7 @@ contract WETHLoopStrategyFuzzTest is Test {
      * @param user2Deposit User 2 deposit (0.5-2 ETH).
      * @param user1WithdrawRatio User 1 withdraw percentage (50-100%).
      */
-    function testFuzz_Divest_MultipleUsers(uint256 user1Deposit, uint256 user2Deposit, uint8 user1WithdrawRatio)
-        public
-    {
+    function testFuzz_Divest_MultipleUsers(uint256 user1Deposit, uint256 user2Deposit, uint8 user1WithdrawRatio) public {
         user1Deposit = bound(user1Deposit, 0.5 ether, 2 ether);
         user2Deposit = bound(user2Deposit, 0.5 ether, 2 ether);
         user1WithdrawRatio = uint8(bound(user1WithdrawRatio, 50, 100));
@@ -499,8 +491,7 @@ contract WETHLoopStrategyFuzzTest is Test {
         strategy.deposit(depositAmount, vault);
         vm.stopPrank();
 
-        (uint256 totalCollateralBase, uint256 totalDebtBase,,,,) =
-            IPool(resolvedPool).getUserAccountData(address(strategy));
+        (uint256 totalCollateralBase, uint256 totalDebtBase,,,,) = IPool(resolvedPool).getUserAccountData(address(strategy));
 
         uint256 leverageRatio = totalCollateralBase * 100 / (totalCollateralBase - totalDebtBase);
 

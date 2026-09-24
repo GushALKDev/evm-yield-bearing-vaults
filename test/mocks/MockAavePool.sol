@@ -161,11 +161,7 @@ contract MockAavePool is IPool {
 
     function getEModeCategoryData(uint8) external view override returns (EModeCategory memory) {
         return EModeCategory({
-            ltv: uint16(LTV_BASE),
-            liquidationThreshold: uint16(liquidationThreshold),
-            liquidationBonus: 10100,
-            priceSource: address(0),
-            label: "ETH correlated"
+            ltv: uint16(LTV_BASE), liquidationThreshold: uint16(liquidationThreshold), liquidationBonus: 10100, priceSource: address(0), label: "ETH correlated"
         });
     }
 

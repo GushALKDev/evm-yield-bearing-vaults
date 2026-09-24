@@ -44,9 +44,7 @@ contract AaveSimpleLendingStrategy is BaseStrategy {
                               CONSTRUCTOR
     //////////////////////////////////////////////////////////////*/
 
-    constructor(IERC20 _asset, address _vault, address _aavePool, address _aToken)
-        BaseStrategy(_asset, _vault, "Aave Strategy", "sAAVE")
-    {
+    constructor(IERC20 _asset, address _vault, address _aavePool, address _aToken) BaseStrategy(_asset, _vault, "Aave Strategy", "sAAVE") {
         AAVE_POOL = _aavePool;
         A_TOKEN = _aToken;
     }

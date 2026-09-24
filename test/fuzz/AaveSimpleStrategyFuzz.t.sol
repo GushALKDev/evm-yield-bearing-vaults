@@ -91,11 +91,7 @@ contract AaveSimpleStrategyFuzzTest is Test {
         assertEq(usdc.balanceOf(address(vault)), REQUIRED_DEPOSIT, "Vault should hold buffer");
         assertEq(usdc.balanceOf(address(strategy)), 0, "Strategy should hold 0 underlying");
 
-        assertEq(
-            vault.totalSupply(),
-            vault.balanceOf(alice) + vault.balanceOf(DEAD_ADDRESS),
-            "Vault supply invariant"
-        );
+        assertEq(vault.totalSupply(), vault.balanceOf(alice) + vault.balanceOf(DEAD_ADDRESS), "Vault supply invariant");
         assertEq(strategy.totalSupply(), strategy.balanceOf(address(vault)), "Strategy supply invariant");
     }
 
@@ -152,9 +148,7 @@ contract AaveSimpleStrategyFuzzTest is Test {
             totalDeposits += baseDeposit;
         }
 
-        assertApproxEqAbs(
-            vault.totalAssets(), totalDeposits + REQUIRED_DEPOSIT, uint256(userCount) * 2, "Total deposits match"
-        );
+        assertApproxEqAbs(vault.totalAssets(), totalDeposits + REQUIRED_DEPOSIT, uint256(userCount) * 2, "Total deposits match");
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -361,11 +355,7 @@ contract AaveSimpleStrategyFuzzTest is Test {
         vault.deposit(depositAmount, alice);
         vm.stopPrank();
 
-        assertEq(
-            vault.totalSupply(),
-            vault.balanceOf(alice) + vault.balanceOf(DEAD_ADDRESS),
-            "Vault total supply invariant"
-        );
+        assertEq(vault.totalSupply(), vault.balanceOf(alice) + vault.balanceOf(DEAD_ADDRESS), "Vault total supply invariant");
         assertEq(strategy.totalSupply(), strategy.balanceOf(address(vault)), "Strategy total supply invariant");
     }
 
@@ -386,9 +376,7 @@ contract AaveSimpleStrategyFuzzTest is Test {
         uint256 vaultAssets = vault.totalAssets();
         uint256 strategyAssets = strategy.totalAssets();
 
-        assertApproxEqAbs(
-            vaultAssets, strategyAssets + REQUIRED_DEPOSIT, 2, "Vault assets should equal strategy + buffer"
-        );
+        assertApproxEqAbs(vaultAssets, strategyAssets + REQUIRED_DEPOSIT, 2, "Vault assets should equal strategy + buffer");
     }
 
     /**

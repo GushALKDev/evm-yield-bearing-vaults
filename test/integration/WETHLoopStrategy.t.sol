@@ -186,8 +186,7 @@ contract WETHLoopStrategyTest is Test {
         vm.stopPrank();
 
         // ============ FETCH AAVE ACCOUNT DATA ============
-        (uint256 totalCollateralBase, uint256 totalDebtBase,,,, uint256 healthFactor) =
-            IPool(resolvedPool).getUserAccountData(address(strategy));
+        (uint256 totalCollateralBase, uint256 totalDebtBase,,,, uint256 healthFactor) = IPool(resolvedPool).getUserAccountData(address(strategy));
 
         // ============ LOG RESULTS ============
         console.log("=== WETH Loop Strategy Results ===");
@@ -238,8 +237,7 @@ contract WETHLoopStrategyTest is Test {
         vm.stopPrank();
 
         // ============ FETCH FINAL AAVE STATE ============
-        (uint256 totalCollateralBase, uint256 totalDebtBase,,,, uint256 healthFactor) =
-            IPool(resolvedPool).getUserAccountData(address(strategy));
+        (uint256 totalCollateralBase, uint256 totalDebtBase,,,, uint256 healthFactor) = IPool(resolvedPool).getUserAccountData(address(strategy));
 
         // ============ LOG RESULTS ============
         console.log("=== After Multiple Deposits ===");
@@ -272,8 +270,7 @@ contract WETHLoopStrategyTest is Test {
         vm.stopPrank();
 
         // Get initial position
-        (uint256 initialCollateral, uint256 initialDebt,,,, uint256 initialHealthFactor) =
-            IPool(resolvedPool).getUserAccountData(address(strategy));
+        (uint256 initialCollateral, uint256 initialDebt,,,, uint256 initialHealthFactor) = IPool(resolvedPool).getUserAccountData(address(strategy));
 
         console.log("=== Before Withdrawal ===");
         console.log("Collateral (USD):", initialCollateral);
@@ -290,8 +287,7 @@ contract WETHLoopStrategyTest is Test {
         uint256 receivedAmount = vaultBalanceAfter - vaultBalanceBefore;
 
         // Get final position
-        (uint256 finalCollateral, uint256 finalDebt,,,, uint256 finalHealthFactor) =
-            IPool(resolvedPool).getUserAccountData(address(strategy));
+        (uint256 finalCollateral, uint256 finalDebt,,,, uint256 finalHealthFactor) = IPool(resolvedPool).getUserAccountData(address(strategy));
 
         console.log("=== After Withdrawal ===");
         console.log("Collateral (USD):", finalCollateral);
@@ -433,8 +429,7 @@ contract WETHLoopStrategyTest is Test {
 
         // ============ PHASE 2: CHECK POSITION AFTER DEPOSITS ============
         {
-            (uint256 totalCollateral, uint256 totalDebt,,,, uint256 healthFactor) =
-                IPool(resolvedPool).getUserAccountData(address(strategy));
+            (uint256 totalCollateral, uint256 totalDebt,,,, uint256 healthFactor) = IPool(resolvedPool).getUserAccountData(address(strategy));
 
             console.log("\n=== Strategy Position After All Deposits ===");
             console.log("Total Collateral (USD):", totalCollateral);
@@ -478,8 +473,7 @@ contract WETHLoopStrategyTest is Test {
             assertApproxEqAbs(received, user3Deposit, 0.0015 ether, "User3 should receive deposit back");
             assertEq(YieldBearingVault(vault).balanceOf(user3), 0, "User3 should have no shares left");
 
-            (uint256 totalCollateral, uint256 totalDebt,,,, uint256 healthFactor) =
-                IPool(resolvedPool).getUserAccountData(address(strategy));
+            (uint256 totalCollateral, uint256 totalDebt,,,, uint256 healthFactor) = IPool(resolvedPool).getUserAccountData(address(strategy));
             assertGe(healthFactor, MIN_HEALTH_FACTOR, "Health factor should remain healthy");
 
             // Verify leverage is maintained
@@ -501,9 +495,7 @@ contract WETHLoopStrategyTest is Test {
             console.log("User2 Expected Assets:", user2ExpectedAssets);
 
             // Allow 0.1% tolerance for user2's position
-            assertApproxEqAbs(
-                user2ExpectedAssets, user2Deposit, 0.002 ether, "User2 should still have their deposit value"
-            );
+            assertApproxEqAbs(user2ExpectedAssets, user2Deposit, 0.002 ether, "User2 should still have their deposit value");
         }
     }
 

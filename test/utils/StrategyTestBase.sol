@@ -107,7 +107,9 @@ abstract contract StrategyTestBase is Test {
 
     function _deployWethLoop() internal returns (YieldBearingVault vault, WETHLoopStrategy strategy) {
         vault = _deployVault();
-        strategy = new WETHLoopStrategy(weth, address(vault), poolManager, aavePool, aToken, debtToken, TARGET_LEVERAGE, MIN_HEALTH_FACTOR, TARGET_HEALTH_FACTOR, EMODE_ETH_CORRELATED);
+        strategy = new WETHLoopStrategy(
+            weth, address(vault), poolManager, aavePool, aToken, debtToken, TARGET_LEVERAGE, MIN_HEALTH_FACTOR, TARGET_HEALTH_FACTOR, EMODE_ETH_CORRELATED
+        );
         vm.prank(admin);
         vault.setStrategy(strategy);
     }

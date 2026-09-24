@@ -174,17 +174,7 @@ contract IntegratedInvariantTest is InvariantBase {
 
     function _createHandlers() internal {
         vaultHandler = new BaseVaultHandler(vault, weth, actors, admin, owner);
-        strategyHandler = new WETHLoopStrategyHandler(
-            vault,
-            strategy,
-            weth,
-            aavePool,
-            aToken,
-            debtToken,
-            actors,
-            admin,
-            owner
-        );
+        strategyHandler = new WETHLoopStrategyHandler(vault, strategy, weth, aavePool, aToken, debtToken, actors, admin, owner);
         adminHandler = new AdminHandler(vault, admin, owner, actors, aavePool);
     }
 
@@ -250,11 +240,13 @@ contract IntegratedInvariantTest is InvariantBase {
     /// @notice Current assets + withdrawals = initial deposit + deposits + simulated yield + measured interest,
     ///         within rounding. Fees are paid in shares and do not change totalAssets().
     function invariant_NoValueLeak() public view {
-        int256 inflows = int256(INITIAL_DEPOSIT + vaultHandler.ghost_totalDeposited() + strategyHandler.ghost_totalInvested() + vaultHandler.ghost_totalYield()) + strategyHandler.ghost_interest();
+        int256 inflows = int256(INITIAL_DEPOSIT + vaultHandler.ghost_totalDeposited() + strategyHandler.ghost_totalInvested() + vaultHandler.ghost_totalYield())
+            + strategyHandler.ghost_interest();
         int256 outflows = int256(vaultHandler.ghost_totalWithdrawn() + strategyHandler.ghost_totalDivested());
         int256 accounted = int256(vault.totalAssets()) + outflows;
 
-        uint256 operations = vaultHandler.ghost_depositCount() + vaultHandler.ghost_withdrawCount() + strategyHandler.ghost_equityOps() + adminHandler.ghost_emergencyModeChanges() + adminHandler.ghost_reinvests();
+        uint256 operations = vaultHandler.ghost_depositCount() + vaultHandler.ghost_withdrawCount() + strategyHandler.ghost_equityOps()
+            + adminHandler.ghost_emergencyModeChanges() + adminHandler.ghost_reinvests();
         uint256 tolerance = DUST_TOLERANCE + operations * AAVE_ROUNDING_PER_OP;
 
         assertApproxEqAbs(accounted, inflows, tolerance, "Value leaked from system");

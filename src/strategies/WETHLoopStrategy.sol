@@ -142,7 +142,9 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
         if (_targetLeverage < 2) revert InvalidLeverage();
         targetLeverage = _targetLeverage;
 
-        if (_minHealthFactor <= HEALTH_FACTOR_FLOOR || _minHealthFactor >= _targetHealthFactor) revert InvalidHealthFactors(_minHealthFactor, _targetHealthFactor);
+        if (_minHealthFactor <= HEALTH_FACTOR_FLOOR || _minHealthFactor >= _targetHealthFactor) {
+            revert InvalidHealthFactors(_minHealthFactor, _targetHealthFactor);
+        }
         minHealthFactor = _minHealthFactor;
         targetHealthFactor = _targetHealthFactor;
         E_MODE_CATEGORY_ID = _eModeCategoryId;

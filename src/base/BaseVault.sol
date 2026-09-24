@@ -82,14 +82,11 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
     /**
      * @dev Burns initial shares to dead address for inflation attack protection.
      */
-    constructor(
-        IERC20 _asset,
-        string memory _name,
-        string memory _symbol,
-        address _owner,
-        address _admin,
-        uint256 _initialDeposit
-    ) ERC4626(_asset) ERC20(_name, _symbol) Whitelist(_owner) {
+    constructor(IERC20 _asset, string memory _name, string memory _symbol, address _owner, address _admin, uint256 _initialDeposit)
+        ERC4626(_asset)
+        ERC20(_name, _symbol)
+        Whitelist(_owner)
+    {
         if (_admin == address(0)) revert InvalidAdmin();
         admin = _admin;
 

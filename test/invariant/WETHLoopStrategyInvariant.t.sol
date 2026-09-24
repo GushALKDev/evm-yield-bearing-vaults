@@ -170,17 +170,7 @@ contract WETHLoopStrategyInvariantTest is InvariantBase {
     }
 
     function _createHandler() internal {
-        strategyHandler = new WETHLoopStrategyHandler(
-            vault,
-            strategy,
-            weth,
-            aavePool,
-            aToken,
-            debtToken,
-            actors,
-            admin,
-            owner
-        );
+        strategyHandler = new WETHLoopStrategyHandler(vault, strategy, weth, aavePool, aToken, debtToken, actors, admin, owner);
     }
 
     function _configureInvariantTesting() internal {

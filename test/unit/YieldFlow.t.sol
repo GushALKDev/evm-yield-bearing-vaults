@@ -24,7 +24,6 @@ contract MockERC20 is ERC20 {
  *      using a MockStrategy that doesn't interact with external protocols.
  */
 contract YieldFlowTest is Test {
-
     /*//////////////////////////////////////////////////////////////
                                STATE
     //////////////////////////////////////////////////////////////*/
@@ -135,10 +134,7 @@ contract YieldFlowTest is Test {
         // ============ ASSERT: YIELD REFLECTED IN TOTAL ASSETS ============
         // Total = User Deposit + Yield + Dead Buffer
         assertApproxEqAbs(
-            vault.totalAssets(),
-            DEPOSIT_AMOUNT + YIELD_AMOUNT_10_PERCENT + INITIAL_DEPOSIT_DEAD,
-            3,
-            "Total assets should include yield and dead assets"
+            vault.totalAssets(), DEPOSIT_AMOUNT + YIELD_AMOUNT_10_PERCENT + INITIAL_DEPOSIT_DEAD, 3, "Total assets should include yield and dead assets"
         );
 
         // ============ ACT: FULL WITHDRAWAL ============
@@ -148,9 +144,7 @@ contract YieldFlowTest is Test {
 
         // ============ ASSERT: ALICE RECEIVED PRINCIPAL + YIELD ============
         // Alice should have original balance + yield (minus ~200 wei dust for dead shares)
-        assertApproxEqAbs(
-            asset.balanceOf(alice), INITIAL_SUPPLY_ALICE + YIELD_AMOUNT_10_PERCENT, 200, "Alice should have profit"
-        );
+        assertApproxEqAbs(asset.balanceOf(alice), INITIAL_SUPPLY_ALICE + YIELD_AMOUNT_10_PERCENT, 200, "Alice should have profit");
         // Vault retains dead shares worth of assets
         assertGe(vault.totalAssets(), INITIAL_DEPOSIT_DEAD, "Vault should hold dead assets after exit");
     }

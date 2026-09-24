@@ -71,7 +71,9 @@ abstract contract GasBenchmarkBase is Test {
         vault.addToWhitelist(userB);
         vm.stopPrank();
 
-        strategy = new WETHLoopStrategy(weth, address(vault), poolManager, aavePool, aToken, debtToken, TARGET_LEVERAGE, MIN_HEALTH_FACTOR, TARGET_HEALTH_FACTOR, EMODE_ETH_CORRELATED);
+        strategy = new WETHLoopStrategy(
+            weth, address(vault), poolManager, aavePool, aToken, debtToken, TARGET_LEVERAGE, MIN_HEALTH_FACTOR, TARGET_HEALTH_FACTOR, EMODE_ETH_CORRELATED
+        );
         vm.prank(admin);
         vault.setStrategy(strategy);
 
