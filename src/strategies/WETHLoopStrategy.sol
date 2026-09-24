@@ -84,8 +84,10 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
 
     /**
      * @dev Gas that exitPosition() receives before emergency mode can be activated. Measured at the pinned fork block
-     *      with isolated transactions (cold storage): 243,111 through checkHealth() and 288,611 through the admin
-     *      activation, independent of the position size. 450,000 adds about 55% for Aave and Uniswap upgrades.
+     *      with isolated transactions (cold storage), independent of the position size: 243,113 through checkHealth()
+     *      (GasBenchmarkForkTest.test_Gas_CheckHealthEmergencyDivest) and 288,613 through the admin activation
+     *      (EmergencyActivationForkTest.test_AdminEmergency_WethLoop_ClosesPositionAndAllowsRedeem), both read from
+     *      `forge test --match-test <test> --isolate -vvvv`. 450,000 adds about 56% for Aave and Uniswap upgrades.
      */
     uint256 public constant EXIT_GAS = 450_000;
 

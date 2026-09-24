@@ -29,7 +29,9 @@ contract AaveSimpleLendingStrategy is BaseStrategy {
 
     /**
      * @dev Gas that exitPosition() receives before emergency mode can be activated. Measured at the pinned fork block
-     *      with isolated transactions: 156,137 through the admin activation. 250,000 adds about 60% for Aave upgrades.
+     *      with isolated transactions: 156,070 through the admin activation
+     *      (EmergencyActivationForkTest.test_AdminEmergency_AaveSimple_ExitsAaveAndAllowsRedeem, read from
+     *      `forge test --match-test <test> --isolate -vvvv`). 250,000 adds about 60% for Aave upgrades.
      */
     uint256 public constant EXIT_GAS = 250_000;
 
