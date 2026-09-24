@@ -75,6 +75,13 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
 
     uint256 private constant BPS = 10_000;
 
+    /**
+     * @dev Gas that exitPosition() receives before emergency mode can be activated. Measured at the pinned fork block
+     *      with isolated transactions (cold storage): 243,111 through checkHealth() and 288,611 through the admin
+     *      activation, independent of the position size. 450,000 adds about 55% for Aave and Uniswap upgrades.
+     */
+    uint256 public constant EXIT_GAS = 450_000;
+
     /*//////////////////////////////////////////////////////////////
                                  ERRORS
     //////////////////////////////////////////////////////////////*/
@@ -350,6 +357,10 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
         (,,,,, uint256 healthFactor) = IPool(AAVE_POOL).getUserAccountData(address(this));
         uint256 target = targetHealthFactor;
         if (healthFactor < target) revert HealthFactorBelowTarget(healthFactor, target);
+    }
+
+    function _exitGas() internal pure override returns (uint256) {
+        return EXIT_GAS;
     }
 
     /**

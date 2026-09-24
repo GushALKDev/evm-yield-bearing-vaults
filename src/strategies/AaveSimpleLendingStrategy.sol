@@ -26,6 +26,12 @@ contract AaveSimpleLendingStrategy is BaseStrategy {
 
     uint256 private constant RAY = 1e27;
 
+    /**
+     * @dev Gas that exitPosition() receives before emergency mode can be activated. Measured at the pinned fork block
+     *      with isolated transactions: 156,137 through the admin activation. 250,000 adds about 60% for Aave upgrades.
+     */
+    uint256 public constant EXIT_GAS = 250_000;
+
     /*//////////////////////////////////////////////////////////////
                                  ERRORS
     //////////////////////////////////////////////////////////////*/
@@ -86,6 +92,10 @@ contract AaveSimpleLendingStrategy is BaseStrategy {
         //slither-disable-next-line unused-return
         // Withdrawn amount is the full aToken balance
         AaveAdapter.withdraw(AAVE_POOL, asset(), type(uint256).max);
+    }
+
+    function _exitGas() internal pure override returns (uint256) {
+        return EXIT_GAS;
     }
 
     /**

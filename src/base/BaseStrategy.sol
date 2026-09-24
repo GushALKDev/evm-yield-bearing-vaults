@@ -33,6 +33,12 @@ abstract contract BaseStrategy is ERC4626 {
      */
     uint8 private constant DECIMALS_OFFSET = 6;
 
+    /**
+     * @dev Gas for the instructions between the gasleft() check in setEmergencyMode() and the call to exitPosition()
+     *      (encoding, the call itself and the warm self address).
+     */
+    uint256 private constant EXIT_CALL_OVERHEAD = 5_000;
+
     /*//////////////////////////////////////////////////////////////
                                  EVENTS
     //////////////////////////////////////////////////////////////*/
@@ -50,6 +56,7 @@ abstract contract BaseStrategy is ERC4626 {
     error NotVaultAdmin();
     error StrategyInEmergency();
     error OnlySelf();
+    error InsufficientGasForExit(uint256 available, uint256 required);
 
     /*//////////////////////////////////////////////////////////////
                               CONSTRUCTOR
@@ -169,6 +176,14 @@ abstract contract BaseStrategy is ERC4626 {
 
         // Interactions
         if (_active) {
+            // A call forwards at most 63/64 of the remaining gas, so this guarantees exitPosition() gets _exitGas().
+            // Without it a caller could send just enough gas for this frame to survive while the exit runs out of
+            // gas inside the try, leaving emergency mode active with the position open. Checked right before the
+            // call because the effects above consume gas.
+            uint256 required = _exitGas() * 64 / 63 + EXIT_CALL_OVERHEAD;
+            uint256 available = gasleft();
+            if (available < required) revert InsufficientGasForExit(available, required);
+
             try this.exitPosition() {}
             catch (bytes memory reason) {
                 emit EmergencyExitFailed(reason);
@@ -235,6 +250,13 @@ abstract contract BaseStrategy is ERC4626 {
      * @dev Closes the external position. Default is a no-op for strategies without one.
      */
     function _exitPosition() internal virtual {}
+
+    /**
+     * @dev Gas that exitPosition() must receive. Default 0 for strategies without an external position.
+     */
+    function _exitGas() internal pure virtual returns (uint256) {
+        return 0;
+    }
 
     /**
      * @dev Must ensure the contract holds `assets` amount after this call.
