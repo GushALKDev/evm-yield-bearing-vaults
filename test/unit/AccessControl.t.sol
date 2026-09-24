@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {YieldBearingVault} from "../../src/vaults/YieldBearingVault.sol";
 import {MockStrategy} from "../mocks/MockStrategy.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {VaultDeployer} from "../utils/VaultDeployer.sol";
 
 /**
  * @title MockERC20
@@ -22,7 +23,6 @@ contract MockERC20 is ERC20 {
  * @dev Tests onlyVault, onlyAdmin, and onlyVaultAdmin modifiers.
  */
 contract AccessControlTest is Test {
-
     /*//////////////////////////////////////////////////////////////
                                STATE
     //////////////////////////////////////////////////////////////*/
@@ -59,10 +59,9 @@ contract AccessControlTest is Test {
         // ============ DEPLOY MOCK ASSET ============
         asset = new MockERC20();
 
-        // ============ DEPLOY VAULT ============
-        address vaultAddr = vm.computeCreateAddress(owner, vm.getNonce(owner));
-        asset.approve(vaultAddr, INITIAL_DEPOSIT);
-        vault = new YieldBearingVault(asset, owner, admin, INITIAL_DEPOSIT);
+        VaultDeployer vaultDeployer = new VaultDeployer();
+        asset.approve(address(vaultDeployer), INITIAL_DEPOSIT);
+        vault = vaultDeployer.deploy(asset, owner, admin, INITIAL_DEPOSIT);
 
         // ============ DEPLOY & CONNECT STRATEGY ============
         strategy = new MockStrategy(asset, address(vault));
@@ -123,6 +122,26 @@ contract AccessControlTest is Test {
         vm.expectRevert(abi.encodeWithSignature("OnlyVault()"));
         strategy.mint(DEPOSIT_AMOUNT, attacker);
         vm.stopPrank();
+    }
+
+    /**
+     * @notice Tests that vault can successfully call strategy.mint().
+     */
+    function test_Strategy_Mint_SuccessFromVault() public {
+        // ============ ARRANGE ============
+        vm.prank(owner);
+        asset.transfer(address(vault), DEPOSIT_AMOUNT);
+        uint256 shares = strategy.previewDeposit(DEPOSIT_AMOUNT);
+
+        // ============ ACT ============
+        vm.startPrank(address(vault));
+        asset.approve(address(strategy), DEPOSIT_AMOUNT);
+        uint256 assets = strategy.mint(shares, address(vault));
+        vm.stopPrank();
+
+        // ============ ASSERT ============
+        assertEq(strategy.balanceOf(address(vault)), shares, "Vault should receive the minted shares");
+        assertLe(assets, DEPOSIT_AMOUNT, "Mint should not charge more than the deposit it mirrors");
     }
 
     /**
@@ -230,6 +249,30 @@ contract AccessControlTest is Test {
         assertTrue(strategy.emergencyMode(), "Emergency mode should be activated");
     }
 
+    /**
+     * @notice Tests that exitPosition() only accepts calls from the strategy itself.
+     */
+    function test_Strategy_ExitPosition_RevertIfNotSelf() public {
+        // ============ ACT & ASSERT ============
+        vm.prank(attacker);
+        vm.expectRevert(abi.encodeWithSignature("OnlySelf()"));
+        strategy.exitPosition();
+
+        vm.prank(address(vault));
+        vm.expectRevert(abi.encodeWithSignature("OnlySelf()"));
+        strategy.exitPosition();
+    }
+
+    /**
+     * @notice Tests that only the vault can call strategy.reinvest().
+     */
+    function test_Strategy_Reinvest_RevertIfNotVault() public {
+        // ============ ACT & ASSERT ============
+        vm.prank(admin);
+        vm.expectRevert(abi.encodeWithSignature("OnlyVault()"));
+        strategy.reinvest();
+    }
+
     /*//////////////////////////////////////////////////////////////
                     STRATEGY EMERGENCY MODE BEHAVIOR
     //////////////////////////////////////////////////////////////*/
@@ -323,6 +366,49 @@ contract AccessControlTest is Test {
         vm.prank(attacker);
         vm.expectRevert(abi.encodeWithSignature("NotAdmin()"));
         vault.setEmergencyMode(true);
+    }
+
+    /**
+     * @notice Tests that only the strategy can call activateEmergencyMode(), not an attacker or the admin.
+     */
+    function test_Vault_ActivateEmergencyMode_RevertIfNotStrategy() public {
+        // ============ ACT & ASSERT ============
+        vm.prank(attacker);
+        vm.expectRevert(abi.encodeWithSignature("NotStrategy()"));
+        vault.activateEmergencyMode();
+
+        vm.prank(admin);
+        vm.expectRevert(abi.encodeWithSignature("NotStrategy()"));
+        vault.activateEmergencyMode();
+
+        assertFalse(vault.emergencyMode(), "Emergency mode should stay off");
+    }
+
+    /**
+     * @notice Tests that non-admin cannot reinvest.
+     */
+    function test_Vault_Reinvest_RevertIfNotAdmin() public {
+        // ============ ACT & ASSERT ============
+        vm.prank(attacker);
+        vm.expectRevert(abi.encodeWithSignature("NotAdmin()"));
+        vault.reinvest();
+    }
+
+    /**
+     * @notice Tests that reinvest reverts on a vault without a strategy.
+     */
+    function test_Vault_Reinvest_RevertIfNoStrategy() public {
+        // ============ ARRANGE ============
+        vm.startPrank(owner);
+        VaultDeployer vaultDeployer = new VaultDeployer();
+        asset.approve(address(vaultDeployer), INITIAL_DEPOSIT);
+        YieldBearingVault emptyVault = vaultDeployer.deploy(asset, owner, admin, INITIAL_DEPOSIT);
+        vm.stopPrank();
+
+        // ============ ACT & ASSERT ============
+        vm.prank(admin);
+        vm.expectRevert(abi.encodeWithSignature("InvalidStrategy()"));
+        emptyVault.reinvest();
     }
 
     /**

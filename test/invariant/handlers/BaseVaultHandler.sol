@@ -4,6 +4,7 @@ pragma solidity 0.8.26;
 import {Test} from "forge-std/Test.sol";
 import {YieldBearingVault} from "../../../src/vaults/YieldBearingVault.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {BaseStrategy} from "../../../src/base/BaseStrategy.sol";
 
 /**
  * @title BaseVaultHandler
@@ -25,6 +26,12 @@ contract BaseVaultHandler is Test {
     uint256 public ghost_depositCount;
     uint256 public ghost_withdrawCount;
     uint256 public ghost_transferCount;
+
+    /// @dev High-water mark recomputed from its definition in BaseVault (see _applyFeeAssessment).
+    uint256 public ghost_expectedHwm;
+    /// @dev Assets sent directly to the strategy to simulate yield.
+    uint256 public ghost_totalYield;
+    uint256 public ghost_yieldCount;
 
     /*//////////////////////////////////////////////////////////////
                                STATE
@@ -49,6 +56,7 @@ contract BaseVaultHandler is Test {
         actors = _actors;
         admin = _admin;
         owner = _owner;
+        ghost_expectedHwm = _vault.highWaterMark();
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -62,11 +70,13 @@ contract BaseVaultHandler is Test {
         amount = bound(amount, MIN_DEPOSIT, MAX_DEPOSIT);
 
         deal(address(asset), actor, amount);
+        _applyFeeAssessment();
 
         vm.startPrank(actor);
         asset.approve(address(vault), amount);
 
         uint256 sharesBefore = vault.balanceOf(actor);
+        uint256 supplyBefore = vault.totalSupply();
         uint256 shares = vault.deposit(amount, actor);
         uint256 sharesAfter = vault.balanceOf(actor);
         vm.stopPrank();
@@ -74,8 +84,11 @@ contract BaseVaultHandler is Test {
         ghost_totalDeposited += amount;
         ghost_userDeposits[actor] += amount;
         ghost_depositCount++;
+        ghost_expectedHwm += amount;
 
-        assert(sharesAfter == sharesBefore + shares);
+        // When the actor is the fee recipient, the deposit also mints the pending fee shares to it before pricing
+        uint256 expectedIncrease = actor == vault.feeRecipient() ? vault.totalSupply() - supplyBefore : shares;
+        assert(sharesAfter == sharesBefore + expectedIncrease);
     }
 
     function withdraw(uint256 actorSeed, uint256 withdrawBps) external {
@@ -91,6 +104,8 @@ contract BaseVaultHandler is Test {
         uint256 expectedAssets = vault.previewRedeem(sharesToRedeem);
         if (expectedAssets == 0) return;
 
+        _applyFeeAssessment();
+
         vm.startPrank(actor);
         uint256 balanceBefore = asset.balanceOf(actor);
         uint256 assets = vault.redeem(sharesToRedeem, actor, actor);
@@ -100,6 +115,7 @@ contract BaseVaultHandler is Test {
         ghost_totalWithdrawn += assets;
         ghost_userWithdrawals[actor] += assets;
         ghost_withdrawCount++;
+        ghost_expectedHwm = assets > ghost_expectedHwm ? 0 : ghost_expectedHwm - assets;
 
         assert(balanceAfter >= balanceBefore + assets - 10);
     }
@@ -135,6 +151,7 @@ contract BaseVaultHandler is Test {
         address feeRecipient = vault.feeRecipient();
         uint256 recipientSharesBefore = feeRecipient != address(0) ? vault.balanceOf(feeRecipient) : 0;
 
+        _applyFeeAssessment();
         vault.assessPerformanceFee();
 
         uint256 supplyAfter = vault.totalSupply();
@@ -147,9 +164,37 @@ contract BaseVaultHandler is Test {
         }
     }
 
+    /**
+     * @notice Sends assets directly to the strategy to simulate yield of up to 10% of its current assets.
+     * @dev Skipped while the strategy has no shares outstanding: yield on an empty position would be owned by
+     *      the strategy's virtual shares, not by the vault.
+     */
+    function simulateYield(uint256 amount) external {
+        BaseStrategy strategy = vault.strategy();
+        uint256 strategyAssets = strategy.totalAssets();
+        if (strategy.totalSupply() == 0 || strategyAssets < 10) return;
+
+        amount = bound(amount, 1, strategyAssets / 10);
+        deal(address(asset), address(strategy), asset.balanceOf(address(strategy)) + amount);
+
+        ghost_totalYield += amount;
+        ghost_yieldCount++;
+    }
+
     /*//////////////////////////////////////////////////////////////
                            HELPER FUNCTIONS
     //////////////////////////////////////////////////////////////*/
+
+    /**
+     * @dev Mirrors BaseVault._assessPerformanceFee(): with a non-zero fee and a recipient, the HWM is raised to
+     *      totalAssets() when assets exceed it. Called right before each vault operation that assesses fees,
+     *      while totalAssets() still has its pre-operation value.
+     */
+    function _applyFeeAssessment() internal {
+        if (vault.protocolFeeBps() == 0 || vault.feeRecipient() == address(0)) return;
+        uint256 currentAssets = vault.totalAssets();
+        if (currentAssets > ghost_expectedHwm) ghost_expectedHwm = currentAssets;
+    }
 
     function _selectActor(uint256 seed) internal view returns (address) {
         return actors[seed % actors.length];

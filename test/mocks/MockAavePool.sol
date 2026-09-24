@@ -23,8 +23,19 @@ contract MockAavePool is IPool {
     address public primaryAsset;
 
     uint256 public constant LTV_BASE = 9300; // 93% LTV for E-Mode
-    uint256 public constant LIQUIDATION_THRESHOLD = 9500; // 95%
+    /// @dev Liquidation threshold in bps (95%), used for E-Mode, the reserve configuration and the health factor.
+    uint256 public liquidationThreshold = 9500;
     uint256 public constant HEALTH_FACTOR_DECIMALS = 1e18;
+    uint256 public constant RAY = 1e27;
+
+    /// @dev Liquidity index reported by getReserveNormalizedIncome(). Supplies that scale to 0 revert, as in Aave.
+    uint256 public normalizedIncome = RAY;
+
+    /// @dev Reserve paused flag, reported at bit 60 of getConfiguration(); supply and withdraw revert while set.
+    bool public reservePaused;
+
+    error InvalidMintAmount();
+    error ReservePaused();
 
     /*//////////////////////////////////////////////////////////////
                              CONSTRUCTOR
@@ -48,16 +59,31 @@ contract MockAavePool is IPool {
         primaryAsset = asset;
     }
 
+    function setNormalizedIncome(uint256 income) external {
+        normalizedIncome = income;
+    }
+
+    function setReservePaused(bool paused) external {
+        reservePaused = paused;
+    }
+
+    function setLiquidationThreshold(uint256 threshold) external {
+        liquidationThreshold = threshold;
+    }
+
     /*//////////////////////////////////////////////////////////////
                           POOL FUNCTIONS
     //////////////////////////////////////////////////////////////*/
 
-    function supply(address asset, uint256 amount, address onBehalfOf, uint16) external override {
+    function supply(address asset, uint256 amount, address onBehalfOf, uint16) public virtual override {
+        if (reservePaused) revert ReservePaused();
+        if (amount * RAY / normalizedIncome == 0) revert InvalidMintAmount();
         IERC20(asset).transferFrom(msg.sender, address(this), amount);
         aTokens[asset].mint(onBehalfOf, amount);
     }
 
     function withdraw(address asset, uint256 amount, address to) external override returns (uint256) {
+        if (reservePaused) revert ReservePaused();
         MockAToken aToken = aTokens[asset];
         uint256 balance = aToken.balanceOf(msg.sender);
         uint256 withdrawAmount = amount > balance ? balance : amount;
@@ -88,6 +114,10 @@ contract MockAavePool is IPool {
         userEModes[msg.sender] = categoryId;
     }
 
+    function getReserveNormalizedIncome(address) external view override returns (uint256) {
+        return normalizedIncome;
+    }
+
     function getUserAccountData(address user)
         external
         view
@@ -103,7 +133,7 @@ contract MockAavePool is IPool {
     {
         totalCollateralBase = _getTotalCollateral(user);
         totalDebtBase = _getTotalDebt(user);
-        currentLiquidationThreshold = LIQUIDATION_THRESHOLD;
+        currentLiquidationThreshold = liquidationThreshold;
         ltv = LTV_BASE;
 
         if (totalDebtBase == 0) {
@@ -116,13 +146,22 @@ contract MockAavePool is IPool {
         }
     }
 
-    function getEModeCategoryData(uint8) external pure override returns (EModeCategory memory) {
+    function getEModeCategoryCollateralConfig(uint8) external view override returns (CollateralConfig memory) {
+        return CollateralConfig({ltv: uint16(LTV_BASE), liquidationThreshold: uint16(liquidationThreshold), liquidationBonus: 10100});
+    }
+
+    function getConfiguration(address) external view override returns (uint256) {
+        return LTV_BASE | (liquidationThreshold << 16) | (uint256(reservePaused ? 1 : 0) << 60);
+    }
+
+    /// @dev The mock holds the underlying itself, so its balance is what a withdrawal can pay out.
+    function getVirtualUnderlyingBalance(address asset) external view override returns (uint128) {
+        return uint128(IERC20(asset).balanceOf(address(this)));
+    }
+
+    function getEModeCategoryData(uint8) external view override returns (EModeCategory memory) {
         return EModeCategory({
-            ltv: uint16(LTV_BASE),
-            liquidationThreshold: uint16(LIQUIDATION_THRESHOLD),
-            liquidationBonus: 10100,
-            priceSource: address(0),
-            label: "ETH correlated"
+            ltv: uint16(LTV_BASE), liquidationThreshold: uint16(liquidationThreshold), liquidationBonus: 10100, priceSource: address(0), label: "ETH correlated"
         });
     }
 

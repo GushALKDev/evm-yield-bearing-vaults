@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {YieldBearingVault} from "../../src/vaults/YieldBearingVault.sol";
 import {MockStrategy} from "../mocks/MockStrategy.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {VaultDeployer} from "../utils/VaultDeployer.sol";
 
 /**
  * @title MockERC20
@@ -22,7 +23,6 @@ contract MockERC20 is ERC20 {
  * @dev Tests admin operations, fee management, emergency circuit breaker, and error paths.
  */
 contract BaseVaultTest is Test {
-
     /*//////////////////////////////////////////////////////////////
                                STATE
     //////////////////////////////////////////////////////////////*/
@@ -63,10 +63,9 @@ contract BaseVaultTest is Test {
         // ============ DEPLOY MOCK ASSET ============
         asset = new MockERC20();
 
-        // ============ DEPLOY VAULT ============
-        address vaultAddr = vm.computeCreateAddress(owner, vm.getNonce(owner));
-        asset.approve(vaultAddr, INITIAL_DEPOSIT);
-        vault = new YieldBearingVault(asset, owner, admin, INITIAL_DEPOSIT);
+        VaultDeployer vaultDeployer = new VaultDeployer();
+        asset.approve(address(vaultDeployer), INITIAL_DEPOSIT);
+        vault = vaultDeployer.deploy(asset, owner, admin, INITIAL_DEPOSIT);
 
         // ============ DEPLOY & CONNECT STRATEGY ============
         strategy = new MockStrategy(asset, address(vault));
@@ -198,6 +197,10 @@ contract BaseVaultTest is Test {
      * @notice Tests that fee recipient can be changed.
      */
     function test_SetFeeRecipient_Success() public {
+        // ============ ARRANGE ============
+        vm.prank(owner);
+        vault.addToWhitelist(feeRecipient);
+
         // ============ ACT ============
         vm.prank(admin);
         vm.expectEmit(true, false, false, false);
@@ -286,6 +289,25 @@ contract BaseVaultTest is Test {
     }
 
     /**
+     * @notice Tests that mints are blocked during emergency mode.
+     */
+    function test_EmergencyMode_BlocksMints() public {
+        // ============ ARRANGE ============
+        vm.prank(owner);
+        vault.addToWhitelist(alice);
+
+        vm.prank(admin);
+        vault.setEmergencyMode(true);
+
+        // ============ ACT & ASSERT ============
+        vm.startPrank(alice);
+        asset.approve(address(vault), DEPOSIT_AMOUNT);
+        vm.expectRevert(abi.encodeWithSignature("VaultInEmergency()"));
+        vault.mint(DEPOSIT_AMOUNT, alice);
+        vm.stopPrank();
+    }
+
+    /**
      * @notice Tests that withdrawals are allowed during emergency mode.
      */
     function test_EmergencyMode_AllowsWithdrawals() public {
@@ -321,6 +343,94 @@ contract BaseVaultTest is Test {
         vault.setEmergencyMode(true);
     }
 
+    /**
+     * @notice Tests that the strategy cannot be replaced during emergency mode.
+     */
+    function test_SetStrategy_RevertIfEmergency() public {
+        // ============ ARRANGE ============
+        MockStrategy newStrategy = new MockStrategy(asset, address(vault));
+        vm.prank(admin);
+        vault.setEmergencyMode(true);
+
+        // ============ ACT & ASSERT ============
+        vm.prank(admin);
+        vm.expectRevert(abi.encodeWithSignature("VaultInEmergency()"));
+        vault.setStrategy(newStrategy);
+
+        assertEq(address(vault.strategy()), address(strategy), "Strategy should not change");
+        assertEq(vault.emergencyMode(), strategy.emergencyMode(), "Vault and strategy flags stay in sync");
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                         ERC-4626 LIMIT TESTS
+    //////////////////////////////////////////////////////////////*/
+
+    /**
+     * @notice Tests that maxDeposit is 0 during emergency mode and unlimited again after it.
+     */
+    function test_MaxDeposit_ZeroDuringEmergency() public {
+        // ============ ARRANGE ============
+        vm.prank(owner);
+        vault.addToWhitelist(alice);
+        assertEq(vault.maxDeposit(alice), type(uint256).max, "Whitelisted receiver should be unlimited");
+
+        // ============ ACT ============
+        vm.prank(admin);
+        vault.setEmergencyMode(true);
+
+        // ============ ASSERT ============
+        assertEq(vault.maxDeposit(alice), 0, "maxDeposit should be 0 during emergency");
+
+        vm.prank(admin);
+        vault.setEmergencyMode(false);
+        assertEq(vault.maxDeposit(alice), type(uint256).max, "maxDeposit should be unlimited after emergency");
+    }
+
+    /**
+     * @notice Tests that maxMint is 0 during emergency mode and unlimited again after it.
+     */
+    function test_MaxMint_ZeroDuringEmergency() public {
+        // ============ ARRANGE ============
+        vm.prank(owner);
+        vault.addToWhitelist(alice);
+        assertEq(vault.maxMint(alice), type(uint256).max, "Whitelisted receiver should be unlimited");
+
+        // ============ ACT ============
+        vm.prank(admin);
+        vault.setEmergencyMode(true);
+
+        // ============ ASSERT ============
+        assertEq(vault.maxMint(alice), 0, "maxMint should be 0 during emergency");
+
+        vm.prank(admin);
+        vault.setEmergencyMode(false);
+        assertEq(vault.maxMint(alice), type(uint256).max, "maxMint should be unlimited after emergency");
+    }
+
+    /**
+     * @notice Tests that maxDeposit is 0 for a receiver that is not whitelisted.
+     */
+    function test_MaxDeposit_ZeroForNonWhitelisted() public {
+        // ============ ASSERT ============
+        assertEq(vault.maxDeposit(alice), 0, "maxDeposit should be 0 for a non-whitelisted receiver");
+
+        vm.prank(owner);
+        vault.addToWhitelist(alice);
+        assertEq(vault.maxDeposit(alice), type(uint256).max, "maxDeposit should be unlimited once whitelisted");
+    }
+
+    /**
+     * @notice Tests that maxMint is 0 for a receiver that is not whitelisted.
+     */
+    function test_MaxMint_ZeroForNonWhitelisted() public {
+        // ============ ASSERT ============
+        assertEq(vault.maxMint(alice), 0, "maxMint should be 0 for a non-whitelisted receiver");
+
+        vm.prank(owner);
+        vault.addToWhitelist(alice);
+        assertEq(vault.maxMint(alice), type(uint256).max, "maxMint should be unlimited once whitelisted");
+    }
+
     /*//////////////////////////////////////////////////////////////
                         CONSTRUCTOR TESTS
     //////////////////////////////////////////////////////////////*/
@@ -333,10 +443,9 @@ contract BaseVaultTest is Test {
         uint256 wrongAmount = 999;
 
         vm.startPrank(owner);
-        address vaultAddr = vm.computeCreateAddress(owner, vm.getNonce(owner));
-        asset.approve(vaultAddr, wrongAmount);
 
         // ============ ACT & ASSERT ============
+        // Reverts on the amount check, before any transferFrom, so no approval is needed
         vm.expectRevert(abi.encodeWithSignature("IncorrectInitialDeposit(uint256)", wrongAmount));
         new YieldBearingVault(asset, owner, admin, wrongAmount);
         vm.stopPrank();

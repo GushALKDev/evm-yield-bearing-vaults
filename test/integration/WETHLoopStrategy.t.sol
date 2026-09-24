@@ -8,6 +8,8 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IPool} from "../../src/interfaces/aave/IPool.sol";
 import {Constants} from "../../src/utils/Constants.sol";
 import {YieldBearingVault} from "../../src/vaults/YieldBearingVault.sol";
+import {ForkConfig} from "../utils/ForkConfig.sol";
+import {VaultDeployer} from "../utils/VaultDeployer.sol";
 
 /**
  * @title WETHLoopStrategyTest
@@ -104,8 +106,7 @@ contract WETHLoopStrategyTest is Test {
         vaultAdmin = makeAddr("vaultAdmin");
 
         // ============ FORK MAINNET ============
-        string memory rpc = vm.envString("ETHEREUM_MAINNET_RPC");
-        vm.createSelectFork(rpc);
+        ForkConfig.selectMainnetFork();
 
         weth = IERC20(WETH_MAINNET);
         address poolManagerAddress = UNISWAP_V4_POOL_MANAGER;
@@ -127,10 +128,9 @@ contract WETHLoopStrategyTest is Test {
         vm.startPrank(vaultOwner);
         deal(address(weth), vaultOwner, INITIAL_DEPOSIT);
 
-        // Pre-compute vault address to approve initial deposit
-        address predictedVault = vm.computeCreateAddress(vaultOwner, vm.getNonce(vaultOwner));
-        weth.approve(predictedVault, INITIAL_DEPOSIT);
-        YieldBearingVault bVault = new YieldBearingVault(weth, vaultOwner, vaultAdmin, INITIAL_DEPOSIT);
+        VaultDeployer vaultDeployer = new VaultDeployer();
+        weth.approve(address(vaultDeployer), INITIAL_DEPOSIT);
+        YieldBearingVault bVault = vaultDeployer.deploy(weth, vaultOwner, vaultAdmin, INITIAL_DEPOSIT);
         vm.stopPrank();
 
         vault = address(bVault);
@@ -186,8 +186,7 @@ contract WETHLoopStrategyTest is Test {
         vm.stopPrank();
 
         // ============ FETCH AAVE ACCOUNT DATA ============
-        (uint256 totalCollateralBase, uint256 totalDebtBase,,,, uint256 healthFactor) =
-            IPool(resolvedPool).getUserAccountData(address(strategy));
+        (uint256 totalCollateralBase, uint256 totalDebtBase,,,, uint256 healthFactor) = IPool(resolvedPool).getUserAccountData(address(strategy));
 
         // ============ LOG RESULTS ============
         console.log("=== WETH Loop Strategy Results ===");
@@ -238,8 +237,7 @@ contract WETHLoopStrategyTest is Test {
         vm.stopPrank();
 
         // ============ FETCH FINAL AAVE STATE ============
-        (uint256 totalCollateralBase, uint256 totalDebtBase,,,, uint256 healthFactor) =
-            IPool(resolvedPool).getUserAccountData(address(strategy));
+        (uint256 totalCollateralBase, uint256 totalDebtBase,,,, uint256 healthFactor) = IPool(resolvedPool).getUserAccountData(address(strategy));
 
         // ============ LOG RESULTS ============
         console.log("=== After Multiple Deposits ===");
@@ -272,8 +270,7 @@ contract WETHLoopStrategyTest is Test {
         vm.stopPrank();
 
         // Get initial position
-        (uint256 initialCollateral, uint256 initialDebt,,,, uint256 initialHealthFactor) =
-            IPool(resolvedPool).getUserAccountData(address(strategy));
+        (uint256 initialCollateral, uint256 initialDebt,,,, uint256 initialHealthFactor) = IPool(resolvedPool).getUserAccountData(address(strategy));
 
         console.log("=== Before Withdrawal ===");
         console.log("Collateral (USD):", initialCollateral);
@@ -290,8 +287,7 @@ contract WETHLoopStrategyTest is Test {
         uint256 receivedAmount = vaultBalanceAfter - vaultBalanceBefore;
 
         // Get final position
-        (uint256 finalCollateral, uint256 finalDebt,,,, uint256 finalHealthFactor) =
-            IPool(resolvedPool).getUserAccountData(address(strategy));
+        (uint256 finalCollateral, uint256 finalDebt,,,, uint256 finalHealthFactor) = IPool(resolvedPool).getUserAccountData(address(strategy));
 
         console.log("=== After Withdrawal ===");
         console.log("Collateral (USD):", finalCollateral);
@@ -433,8 +429,7 @@ contract WETHLoopStrategyTest is Test {
 
         // ============ PHASE 2: CHECK POSITION AFTER DEPOSITS ============
         {
-            (uint256 totalCollateral, uint256 totalDebt,,,, uint256 healthFactor) =
-                IPool(resolvedPool).getUserAccountData(address(strategy));
+            (uint256 totalCollateral, uint256 totalDebt,,,, uint256 healthFactor) = IPool(resolvedPool).getUserAccountData(address(strategy));
 
             console.log("\n=== Strategy Position After All Deposits ===");
             console.log("Total Collateral (USD):", totalCollateral);
@@ -478,8 +473,7 @@ contract WETHLoopStrategyTest is Test {
             assertApproxEqAbs(received, user3Deposit, 0.0015 ether, "User3 should receive deposit back");
             assertEq(YieldBearingVault(vault).balanceOf(user3), 0, "User3 should have no shares left");
 
-            (uint256 totalCollateral, uint256 totalDebt,,,, uint256 healthFactor) =
-                IPool(resolvedPool).getUserAccountData(address(strategy));
+            (uint256 totalCollateral, uint256 totalDebt,,,, uint256 healthFactor) = IPool(resolvedPool).getUserAccountData(address(strategy));
             assertGe(healthFactor, MIN_HEALTH_FACTOR, "Health factor should remain healthy");
 
             // Verify leverage is maintained
@@ -501,9 +495,7 @@ contract WETHLoopStrategyTest is Test {
             console.log("User2 Expected Assets:", user2ExpectedAssets);
 
             // Allow 0.1% tolerance for user2's position
-            assertApproxEqAbs(
-                user2ExpectedAssets, user2Deposit, 0.002 ether, "User2 should still have their deposit value"
-            );
+            assertApproxEqAbs(user2ExpectedAssets, user2Deposit, 0.002 ether, "User2 should still have their deposit value");
         }
     }
 
@@ -571,19 +563,20 @@ contract WETHLoopStrategyTest is Test {
         console.log("Final Collateral (WETH):", finalCollateral);
         console.log("Final Debt (WETH):", finalDebt);
 
-        // Debt should be fully repaid (allow small dust)
-        assertLt(finalDebt, 100, "Debt should be fully repaid");
+        // Debt must be fully repaid (the exit reverts otherwise)
+        assertEq(finalDebt, 0, "Debt should be fully repaid");
 
-        // Collateral should be minimal (withdrawn to strategy)
-        assertLt(finalCollateral, 100, "Collateral should be minimal");
+        // Collateral withdrawn, up to Aave's scaled-balance rounding
+        assertLe(finalCollateral, 2, "Collateral should be withdrawn");
 
         // The assets should be sitting in the strategy now
         uint256 strategyWethBalance = weth.balanceOf(address(strategy));
         console.log("Strategy WETH Balance:", strategyWethBalance);
         assertGt(strategyWethBalance, 0, "Strategy should hold withdrawn assets");
 
-        // Should be close to original deposit amount (minus some small losses from rounding)
-        assertApproxEqAbs(strategyWethBalance, depositAmount, 0.001 ether, "Should recover most of deposit");
+        // Zero-fee flash loan and no time elapsed: only Aave rounding (a few wei) is lost
+        assertApproxEqAbs(strategyWethBalance, depositAmount, 10, "Should recover the deposit");
+        assertEq(strategy.totalAssets(), strategyWethBalance + finalCollateral, "Idle WETH is counted as equity");
 
         // ============ ASSERT: NEW DEPOSITS BLOCKED ============
         // Try to deposit - should revert
@@ -623,16 +616,19 @@ contract WETHLoopStrategyTest is Test {
     }
 
     /**
-     * @notice Tests that withdrawals work correctly in emergency mode without attempting divest.
+     * @notice Tests that withdrawals after an emergency divest are paid from the strategy's idle WETH.
      * @dev Verifies:
      *      - Users can withdraw after emergency mode activation
-     *      - Withdrawals don't attempt to divest (position already closed)
-     *      - Users receive their funds from the strategy's WETH balance
+     *      - The position is not re-opened
+     *      - The user receives the proportional share of equity, within rounding
      */
-    function test_EmergencyMode_WithdrawalsSkipDivest() public {
+    function test_EmergencyMode_WithdrawalsPaidFromIdleWeth() public {
         // ============ ARRANGE ============
         address user = makeAddr("user");
         uint256 depositAmount = 1 ether;
+
+        // Reset the vault to its initial deposit: setUp's 100 WETH donation would otherwise price the shares
+        deal(address(weth), vault, INITIAL_DEPOSIT);
 
         // Whitelist and fund user
         vm.prank(vaultOwner);
@@ -671,6 +667,7 @@ contract WETHLoopStrategyTest is Test {
         assertGt(strategyWethBalance, 0, "Strategy should hold divested assets");
 
         // ============ ACT: USER WITHDRAWS ============
+        uint256 expectedAssets = shares * (weth.balanceOf(vault) + strategy.totalAssets()) / YieldBearingVault(vault).totalSupply();
         uint256 userBalanceBefore = weth.balanceOf(user);
 
         vm.prank(user);
@@ -684,9 +681,10 @@ contract WETHLoopStrategyTest is Test {
         console.log("Actual Received:", actualReceived);
 
         // ============ ASSERT: USER RECEIVED FUNDS ============
-        assertGt(actualReceived, 0, "User should receive funds");
-        // Allow up to 2% loss due to flash loan costs and rounding in emergency divest
-        assertApproxEqAbs(actualReceived, depositAmount, 0.02 ether, "User should receive close to deposit amount");
+        assertEq(actualReceived, assetsReceived, "Transferred amount should match the returned amount");
+        assertApproxEqAbs(actualReceived, expectedAssets, 2, "User should receive the proportional share of equity");
+        // Zero-fee flash loan and no time elapsed: only Aave rounding (a few wei) is lost
+        assertApproxEqAbs(actualReceived, depositAmount, 10, "User should receive the deposit back");
 
         // Verify no more debt (position wasn't re-opened)
         uint256 finalDebt = IERC20(VARIABLE_DEBT_WETH).balanceOf(address(strategy));
@@ -694,14 +692,13 @@ contract WETHLoopStrategyTest is Test {
     }
 
     /**
-     * @notice Tests recovery from emergency mode by reinvesting all funds.
+     * @notice Tests the two-step recovery from emergency mode.
      * @dev Verifies:
-     *      - Admin can deactivate emergency mode
-     *      - Funds are automatically reinvested when emergency mode is deactivated
-     *      - Position is restored with proper leverage
+     *      - Admin can deactivate emergency mode, which leaves the recovered WETH idle
+     *      - Admin reinvest() restores the position with the health factor at or above target
      *      - New deposits are allowed again
      */
-    function test_RecoveryFromEmergency_ReinvestsAutomatically() public {
+    function test_RecoveryFromEmergency_ExitThenReinvest() public {
         // ============ ARRANGE ============
         address user = makeAddr("user");
         uint256 depositAmount = 1 ether;
@@ -741,9 +738,16 @@ contract WETHLoopStrategyTest is Test {
         vm.prank(vaultAdmin);
         YieldBearingVault(vault).setEmergencyMode(false);
 
-        // ============ ASSERT: EMERGENCY MODE DEACTIVATED ============
+        // ============ ASSERT: EMERGENCY MODE DEACTIVATED, NOTHING REINVESTED ============
         assertFalse(YieldBearingVault(vault).emergencyMode(), "Vault emergency mode should be deactivated");
         assertFalse(strategy.emergencyMode(), "Strategy emergency mode should be deactivated");
+        assertEq(weth.balanceOf(address(strategy)), strategyBalanceBeforeRecovery, "Exit should not reinvest");
+
+        // ============ ACT: ADMIN RESTORES THRESHOLDS AND REINVESTS ============
+        vm.startPrank(vaultAdmin);
+        strategy.setHealthFactors(MIN_HEALTH_FACTOR, TARGET_HEALTH_FACTOR);
+        YieldBearingVault(vault).reinvest();
+        vm.stopPrank();
 
         // ============ ASSERT: FUNDS REINVESTED ============
         uint256 strategyBalanceAfterRecovery = weth.balanceOf(address(strategy));
@@ -765,7 +769,7 @@ contract WETHLoopStrategyTest is Test {
         // Verify leverage is restored
         (,,,,, uint256 healthFactorAfterRecovery) = IPool(resolvedPool).getUserAccountData(address(strategy));
         console.log("Health Factor After Recovery:", healthFactorAfterRecovery);
-        assertGe(healthFactorAfterRecovery, MIN_HEALTH_FACTOR, "Health factor should be healthy");
+        assertGe(healthFactorAfterRecovery, TARGET_HEALTH_FACTOR, "Health factor should reach the target");
 
         // ============ ASSERT: NEW DEPOSITS ALLOWED ============
         vm.startPrank(user);

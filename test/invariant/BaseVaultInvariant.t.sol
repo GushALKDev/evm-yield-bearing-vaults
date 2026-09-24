@@ -5,10 +5,12 @@ import {console2} from "forge-std/console2.sol";
 import {InvariantBase} from "./InvariantBase.sol";
 import {BaseVaultHandler} from "./handlers/BaseVaultHandler.sol";
 import {AdminHandler} from "./handlers/AdminHandler.sol";
+import {IPool} from "../../src/interfaces/aave/IPool.sol";
 import {YieldBearingVault} from "../../src/vaults/YieldBearingVault.sol";
 import {MockStrategy} from "../mocks/MockStrategy.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {VaultDeployer} from "../utils/VaultDeployer.sol";
 
 contract MockERC20 is ERC20 {
     constructor() ERC20("Mock Token", "MOCK") {
@@ -47,9 +49,9 @@ contract BaseVaultInvariantTest is InvariantBase {
         vm.startPrank(owner);
         asset = new MockERC20();
 
-        address vaultAddr = vm.computeCreateAddress(owner, vm.getNonce(owner));
-        asset.approve(vaultAddr, INITIAL_DEPOSIT);
-        vault = new YieldBearingVault(IERC20(address(asset)), owner, admin, INITIAL_DEPOSIT);
+        VaultDeployer vaultDeployer = new VaultDeployer();
+        asset.approve(address(vaultDeployer), INITIAL_DEPOSIT);
+        vault = vaultDeployer.deploy(IERC20(address(asset)), owner, admin, INITIAL_DEPOSIT);
 
         strategy = new MockStrategy(IERC20(address(asset)), address(vault));
         vm.stopPrank();
@@ -57,6 +59,8 @@ contract BaseVaultInvariantTest is InvariantBase {
         vm.prank(admin);
         vault.setStrategy(strategy);
 
+        vm.prank(owner);
+        vault.addToWhitelist(feeRecipient);
         vm.prank(admin);
         vault.setFeeRecipient(feeRecipient);
 
@@ -70,7 +74,7 @@ contract BaseVaultInvariantTest is InvariantBase {
         vm.stopPrank();
 
         vaultHandler = new BaseVaultHandler(vault, IERC20(address(asset)), actors, admin, owner);
-        adminHandler = new AdminHandler(vault, admin, owner, actors);
+        adminHandler = new AdminHandler(vault, admin, owner, actors, IPool(address(0)));
 
         targetContract(address(vaultHandler));
         targetContract(address(adminHandler));
@@ -144,14 +148,24 @@ contract BaseVaultInvariantTest is InvariantBase {
                 assertTrue(vault.isWhitelisted(actor), "Non-whitelisted address holds shares");
             }
         }
+        // Fee shares, with no exception: the fee recipient holds them and must be whitelisted
+        if (vault.balanceOf(feeRecipient) > 0) {
+            assertTrue(vault.isWhitelisted(feeRecipient), "Non-whitelisted fee recipient holds shares");
+        }
+        address currentRecipient = vault.feeRecipient();
+        if (currentRecipient != address(0)) {
+            assertTrue(vault.isWhitelisted(currentRecipient), "Current fee recipient is not whitelisted");
+        }
     }
 
-    /// @notice High water mark never exceeds total assets significantly.
-    function invariant_HighWaterMarkBounded() public view {
+    /// @notice The HWM follows its definition in BaseVault: +deposits, -withdrawals (floored at 0), raised to
+    ///         totalAssets() when fees are assessed with a non-zero rate and recipient. With no loss source in this
+    ///         suite (yield only), it never exceeds totalAssets() beyond share conversion rounding.
+    function invariant_HighWaterMarkFollowsDefinition() public view {
         uint256 hwm = vault.highWaterMark();
-        uint256 totalAssets = vault.totalAssets();
 
-        assertLe(hwm, totalAssets + (totalAssets / 10) + INITIAL_DEPOSIT, "HWM significantly exceeds total assets");
+        assertEq(hwm, vaultHandler.ghost_expectedHwm(), "HWM diverges from its definition");
+        assertLe(hwm, vault.totalAssets() + DUST_TOLERANCE, "HWM above total assets without any loss");
     }
 
     /// @notice Protocol fee is within valid bounds.
@@ -163,7 +177,8 @@ contract BaseVaultInvariantTest is InvariantBase {
                          CALL SUMMARY
     //////////////////////////////////////////////////////////////*/
 
-    function invariant_CallSummary() public view {
+    /// @notice Logs handler statistics after each run (Foundry hook, not an invariant).
+    function afterInvariant() public view {
         console2.log("=== Vault Handler Stats ===");
         console2.log("Deposits:", vaultHandler.ghost_depositCount());
         console2.log("Withdrawals:", vaultHandler.ghost_withdrawCount());
@@ -171,6 +186,7 @@ contract BaseVaultInvariantTest is InvariantBase {
         console2.log("Total Deposited:", vaultHandler.ghost_totalDeposited());
         console2.log("Total Withdrawn:", vaultHandler.ghost_totalWithdrawn());
         console2.log("Total Fees Minted:", vaultHandler.ghost_totalFeesMinted());
+        console2.log("Yield Events:", vaultHandler.ghost_yieldCount());
 
         console2.log("\n=== Admin Handler Stats ===");
         console2.log("Whitelist Additions:", adminHandler.ghost_whitelistAdditions());

@@ -60,7 +60,7 @@ contract MockPoolManager {
         // No-op in mock - just records the currency for settlement
     }
 
-    function settle() external view returns (uint256 paid) {
+    function settle() public view virtual returns (uint256 paid) {
         address token = Currency.unwrap(_currentCurrency);
         uint256 balanceAfter = IERC20(token).balanceOf(address(this));
 

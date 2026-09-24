@@ -8,6 +8,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {Whitelist} from "../access/Whitelist.sol";
 import {BaseStrategy} from "./BaseStrategy.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 /**
  * @title BaseVault
@@ -27,10 +28,12 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
                                 STORAGE
     //////////////////////////////////////////////////////////////*/
 
+    // forgefmt: disable-start
     // Packed in single slot        // 23 bytes
     BaseStrategy public strategy;   // 20 bytes
     uint16 public protocolFeeBps;   // 2 bytes
     bool public emergencyMode;      // 1 byte
+    // forgefmt: disable-end
 
     address public admin;
     address public feeRecipient;
@@ -70,6 +73,7 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
     error InvalidStrategy();
     error InsufficientStrategyShares(uint256 actual, uint256 expected);
     error InsufficientStrategySharesBurned(uint256 actual, uint256 expected);
+    error FeeRecipientNotRemovable(address account);
 
     /*//////////////////////////////////////////////////////////////
                                CONSTRUCTOR
@@ -78,14 +82,11 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
     /**
      * @dev Burns initial shares to dead address for inflation attack protection.
      */
-    constructor(
-        IERC20 _asset,
-        string memory _name,
-        string memory _symbol,
-        address _owner,
-        address _admin,
-        uint256 _initialDeposit
-    ) ERC4626(_asset) ERC20(_name, _symbol) Whitelist(_owner) {
+    constructor(IERC20 _asset, string memory _name, string memory _symbol, address _owner, address _admin, uint256 _initialDeposit)
+        ERC4626(_asset)
+        ERC20(_name, _symbol)
+        Whitelist(_owner)
+    {
         if (_admin == address(0)) revert InvalidAdmin();
         admin = _admin;
 
@@ -139,9 +140,10 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
     }
 
     /**
-     * @dev Warning: Ensure funds from old strategy are migrated first.
+     * @dev Warning: Ensure funds from old strategy are migrated first. Blocked during emergency mode, since the new
+     *      strategy would start with its flag off while the vault's is on.
      */
-    function setStrategy(BaseStrategy _strategy) external onlyAdmin {
+    function setStrategy(BaseStrategy _strategy) external onlyAdmin whenNotEmergency {
         if (address(_strategy) == address(0)) revert InvalidStrategy();
         strategy = _strategy;
         SafeERC20.forceApprove(IERC20(asset()), address(_strategy), type(uint256).max);
@@ -149,7 +151,7 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
     }
 
     /**
-     * @dev Deposits are blocked but withdrawals remain active.
+     * @dev Deposits are blocked but withdrawals remain active. Deactivation does not reinvest, see reinvest().
      */
     function setEmergencyMode(bool _active) external onlyAdmin {
         emergencyMode = _active;
@@ -173,14 +175,38 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
         emit EmergencyModeSet(true);
     }
 
+    /**
+     * @notice Reinvests idle assets, the second step of leaving emergency mode.
+     * @dev Deposits the vault's own idle balance (initial deposit, donations, rounding) into the strategy, then has
+     *      the strategy invest its whole idle balance. totalAssets() does not change.
+     */
+    function reinvest() external onlyAdmin whenNotEmergency {
+        // Checks
+        BaseStrategy cachedStrategy = strategy;
+        if (address(cachedStrategy) == address(0)) revert InvalidStrategy();
+
+        // Interactions
+        uint256 idle = IERC20(asset()).balanceOf(address(this));
+        if (idle > 0) {
+            uint256 expectedShares = cachedStrategy.previewDeposit(idle);
+            uint256 actualShares = cachedStrategy.deposit(idle, address(this));
+            if (actualShares < expectedShares) revert InsufficientStrategyShares(actualShares, expectedShares);
+        }
+        cachedStrategy.reinvest();
+    }
+
     function setProtocolFee(uint16 _newFeeBps) external onlyAdmin {
         if (_newFeeBps > MAX_PROTOCOL_FEE_BPS) revert ProtocolFeeTooHigh();
         protocolFeeBps = _newFeeBps;
         emit ProtocolFeeSet(_newFeeBps);
     }
 
+    /**
+     * @dev The recipient receives fee shares, so it must be whitelisted like any other share holder.
+     */
     function setFeeRecipient(address _newRecipient) external onlyAdmin {
         if (_newRecipient == address(0)) revert InvalidRecipient();
+        if (!isWhitelisted[_newRecipient]) revert NotWhitelisted(_newRecipient);
         feeRecipient = _newRecipient;
         emit FeeRecipientSet(_newRecipient);
     }
@@ -193,20 +219,49 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
                         ERC4626 OVERRIDES
     //////////////////////////////////////////////////////////////*/
 
-    function deposit(uint256 assets, address receiver) public virtual override nonReentrant returns (uint256) {
-        return super.deposit(assets, receiver);
+    /**
+     * @dev The performance fee is assessed before ERC4626 prices the operation, so shares and assets are
+     *      converted at the post-fee share price. Same for mint, withdraw and redeem. Every limit that maxDeposit()
+     *      and maxMint() report is enforced where it applies (emergency mode and the whitelist by the modifiers,
+     *      the minimum health factor by the strategy), so the ERC4626 comparison with maxDeposit()/maxMint() is not
+     *      repeated here: it would add the strategy's health factor reads to every deposit and replace
+     *      HealthFactorBelowMinimum with ERC4626ExceededMaxDeposit.
+     */
+    function deposit(uint256 assets, address receiver) public virtual override nonReentrant whenNotEmergency onlyWhitelisted(receiver) returns (uint256) {
+        _assessPerformanceFee();
+        uint256 shares = previewDeposit(assets);
+        _deposit(_msgSender(), receiver, assets, shares);
+        return shares;
     }
 
-    function mint(uint256 shares, address receiver) public virtual override nonReentrant returns (uint256) {
-        return super.mint(shares, receiver);
+    function mint(uint256 shares, address receiver) public virtual override nonReentrant whenNotEmergency onlyWhitelisted(receiver) returns (uint256) {
+        _assessPerformanceFee();
+        uint256 assets = previewMint(shares);
+        _deposit(_msgSender(), receiver, assets, shares);
+        return assets;
     }
 
+    /**
+     * @dev Only the owner's balance is compared here: the liquidity limits that maxWithdraw() reports are enforced by
+     *      the strategy and the external protocols, with their specific errors, and repeating them would read the
+     *      strategy's position on every withdrawal. Same for redeem.
+     */
     function withdraw(uint256 assets, address receiver, address owner) public virtual override nonReentrant returns (uint256) {
-        return super.withdraw(assets, receiver, owner);
+        _assessPerformanceFee();
+        uint256 ownerAssets = _convertToAssets(balanceOf(owner), Math.Rounding.Floor);
+        if (assets > ownerAssets) revert ERC4626ExceededMaxWithdraw(owner, assets, ownerAssets);
+        uint256 shares = previewWithdraw(assets);
+        _withdraw(_msgSender(), receiver, owner, assets, shares);
+        return shares;
     }
 
     function redeem(uint256 shares, address receiver, address owner) public virtual override nonReentrant returns (uint256) {
-        return super.redeem(shares, receiver, owner);
+        _assessPerformanceFee();
+        uint256 ownerShares = balanceOf(owner);
+        if (shares > ownerShares) revert ERC4626ExceededMaxRedeem(owner, shares, ownerShares);
+        uint256 assets = previewRedeem(shares);
+        _withdraw(_msgSender(), receiver, owner, assets, shares);
+        return assets;
     }
 
     function totalAssets() public view virtual override returns (uint256) {
@@ -221,18 +276,49 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
         return localBalance + strategyBalance;
     }
 
+    /**
+     * @dev Capped by what the vault can pay now: its idle balance plus the strategy's maxWithdraw() for the vault.
+     *      Computed from the owner's balance directly, since OpenZeppelin derives maxWithdraw() from maxRedeem().
+     */
+    function maxWithdraw(address owner) public view virtual override returns (uint256) {
+        return Math.min(_convertToAssets(balanceOf(owner), Math.Rounding.Floor), _withdrawableAssets());
+    }
+
+    /**
+     * @dev All shares when their redemption fits in _withdrawableAssets(); otherwise the shares whose redemption the
+     *      vault can pay now, rounded down so previewRedeem() of the result stays within _withdrawableAssets().
+     */
+    function maxRedeem(address owner) public view virtual override returns (uint256) {
+        uint256 shares = balanceOf(owner);
+        uint256 withdrawable = _withdrawableAssets();
+        if (_convertToAssets(shares, Math.Rounding.Floor) <= withdrawable) return shares;
+        return _convertToShares(withdrawable, Math.Rounding.Floor);
+    }
+
+    /**
+     * @dev 0 when deposit() could revert, see _depositsOpen().
+     */
+    function maxDeposit(address receiver) public view virtual override returns (uint256) {
+        if (!_depositsOpen(receiver)) return 0;
+        return super.maxDeposit(receiver);
+    }
+
+    /**
+     * @dev 0 when mint() could revert, see _depositsOpen().
+     */
+    function maxMint(address receiver) public view virtual override returns (uint256) {
+        if (!_depositsOpen(receiver)) return 0;
+        return super.maxMint(receiver);
+    }
+
     /*//////////////////////////////////////////////////////////////
                             INTERNAL HOOKS
     //////////////////////////////////////////////////////////////*/
 
     /**
-     * @dev Enforces whitelist, assesses fees, updates HWM, and pushes funds to strategy.
+     * @dev Updates HWM and pushes funds to strategy. Emergency mode, whitelist and fees are handled by the entry points.
      */
-    function _deposit(address caller, address receiver, uint256 assets, uint256 shares) internal virtual override whenNotEmergency {
-        if (!isWhitelisted[receiver]) revert NotWhitelisted(receiver);
-
-        _assessPerformanceFee();
-
+    function _deposit(address caller, address receiver, uint256 assets, uint256 shares) internal virtual override {
         super._deposit(caller, receiver, assets, shares);
 
         // Gas: unchecked safe, overflow impossible (HWM bounded by total token supply << uint256.max)
@@ -249,11 +335,9 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
     }
 
     /**
-     * @dev Assesses fees, pulls funds from strategy if needed, and updates HWM.
+     * @dev Pulls funds from strategy if needed and updates HWM. Fees are assessed by the entry points.
      */
     function _withdraw(address caller, address receiver, address owner, uint256 assets, uint256 shares) internal virtual override {
-        _assessPerformanceFee();
-
         uint256 localBalance = IERC20(asset()).balanceOf(address(this));
 
         if (localBalance < assets) {
@@ -284,37 +368,94 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
     //////////////////////////////////////////////////////////////*/
 
     /**
+     * @dev Idle balance plus what the strategy can pay the vault now. _withdraw() uses the idle balance first and
+     *      withdraws the shortfall from the strategy.
+     */
+    function _withdrawableAssets() internal view returns (uint256) {
+        uint256 idle = IERC20(asset()).balanceOf(address(this));
+        BaseStrategy cachedStrategy = strategy;
+        if (address(cachedStrategy) == address(0)) return idle;
+        return idle + cachedStrategy.maxWithdraw(address(this));
+    }
+
+    /**
+     * @dev False during emergency mode, for receivers that are not whitelisted, and when the strategy's maxDeposit()
+     *      for the vault is 0 (for the WETH loop, when an investment could end below minHealthFactor). The strategies
+     *      report either 0 or type(uint256).max, so their limit is used as all-or-nothing.
+     */
+    function _depositsOpen(address receiver) internal view returns (bool) {
+        if (emergencyMode || !isWhitelisted[receiver]) return false;
+        BaseStrategy cachedStrategy = strategy;
+        return address(cachedStrategy) == address(0) || cachedStrategy.maxDeposit(address(this)) > 0;
+    }
+
+    /**
      * @dev Uses High Water Mark to prevent double-taxing profits.
      *      Fees are minted as new shares, diluting existing holders.
      */
     function _assessPerformanceFee() internal {
-        uint16 feeBps = protocolFeeBps;
-        address recipient = feeRecipient;
+        (uint256 feeShares, uint256 currentAssets, uint256 profit) = _pendingFee();
+        if (profit == 0) return;
 
-        if (feeBps == 0 || recipient == address(0)) return;
-
-        uint256 currentAssets = totalAssets();
-        uint256 hwm = highWaterMark;
-
-        if (currentAssets > hwm) {
-            // Unchecked safe (already checked currentAssets > hwm)
-            uint256 profit;
-            unchecked {
-                profit = currentAssets - hwm;
-            }
-            uint256 feeInAssets = profit * feeBps / MAX_BPS;
-
-            if (feeInAssets > 0) {
-                uint256 feeShares = convertToShares(feeInAssets);
-
-                if (feeShares > 0) {
-                    _mint(recipient, feeShares);
-                    emit PerformanceFeePaid(profit, feeShares);
-                }
-            }
-
-            highWaterMark = currentAssets;
+        if (feeShares > 0) {
+            _mint(feeRecipient, feeShares);
+            emit PerformanceFeePaid(profit, feeShares);
         }
+
+        highWaterMark = currentAssets;
+    }
+
+    /**
+     * @dev What the next _assessPerformanceFee() would do, without state changes: the fee shares it would mint, the
+     *      totalAssets() it would record as the high-water mark and the profit above the mark (all 0 when no fee is
+     *      configured or there is no profit).
+     */
+    function _pendingFee() internal view returns (uint256 feeShares, uint256 currentAssets, uint256 profit) {
+        uint16 feeBps = protocolFeeBps;
+        if (feeBps == 0 || feeRecipient == address(0)) return (0, 0, 0);
+
+        currentAssets = totalAssets();
+        uint256 hwm = highWaterMark;
+        if (currentAssets <= hwm) return (0, currentAssets, 0);
+
+        // Unchecked safe (already checked currentAssets > hwm)
+        unchecked {
+            profit = currentAssets - hwm;
+        }
+        uint256 feeInAssets = profit * feeBps / MAX_BPS;
+
+        // Priced against assets net of the fee, so the minted shares are worth feeInAssets after minting
+        // (convertToShares would price them before the mint dilutes them). Offsets match ERC4626 (+1, +1).
+        if (feeInAssets > 0) feeShares = Math.mulDiv(feeInAssets, totalSupply() + 1, currentAssets - feeInAssets + 1);
+    }
+
+    /**
+     * @dev Conversions count the fee shares that deposit, mint, withdraw and redeem mint before pricing, so
+     *      convertTo*, preview* and max* match those calls exactly. totalAssets() needs no change: the fee is paid in
+     *      shares, not assets.
+     */
+    function _convertToShares(uint256 assets, Math.Rounding rounding) internal view virtual override returns (uint256) {
+        (uint256 feeShares,,) = _pendingFee();
+        return Math.mulDiv(assets, totalSupply() + feeShares + 10 ** _decimalsOffset(), totalAssets() + 1, rounding);
+    }
+
+    function _convertToAssets(uint256 shares, Math.Rounding rounding) internal view virtual override returns (uint256) {
+        (uint256 feeShares,,) = _pendingFee();
+        return Math.mulDiv(shares, totalAssets() + 1, totalSupply() + feeShares + 10 ** _decimalsOffset(), rounding);
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                          WHITELIST OVERRIDES
+    //////////////////////////////////////////////////////////////*/
+
+    /**
+     * @dev The current fee recipient cannot be removed: later fee shares would be minted to a non-whitelisted
+     *      address. Reverting is the only option that neither breaks that property nor changes the fee silently
+     *      (skipping the mint or clearing the recipient would); the admin first moves the fee to another
+     *      whitelisted address with setFeeRecipient().
+     */
+    function _beforeRemoval(address account) internal view override {
+        if (account == feeRecipient) revert FeeRecipientNotRemovable(account);
     }
 
     /*//////////////////////////////////////////////////////////////

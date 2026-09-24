@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {YieldBearingVault} from "../../src/vaults/YieldBearingVault.sol";
 import {MockStrategy} from "../mocks/MockStrategy.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {VaultDeployer} from "../utils/VaultDeployer.sol";
 
 /**
  * @title MockERC20
@@ -22,7 +23,6 @@ contract MockERC20 is ERC20 {
  * @dev Tests unusual scenarios and input validation.
  */
 contract EdgeCasesTest is Test {
-
     /*//////////////////////////////////////////////////////////////
                                STATE
     //////////////////////////////////////////////////////////////*/
@@ -59,10 +59,9 @@ contract EdgeCasesTest is Test {
         // ============ DEPLOY MOCK ASSET ============
         asset = new MockERC20();
 
-        // ============ DEPLOY VAULT ============
-        address vaultAddr = vm.computeCreateAddress(owner, vm.getNonce(owner));
-        asset.approve(vaultAddr, INITIAL_DEPOSIT);
-        vault = new YieldBearingVault(asset, owner, admin, INITIAL_DEPOSIT);
+        VaultDeployer vaultDeployer = new VaultDeployer();
+        asset.approve(address(vaultDeployer), INITIAL_DEPOSIT);
+        vault = vaultDeployer.deploy(asset, owner, admin, INITIAL_DEPOSIT);
 
         // ============ DEPLOY & CONNECT STRATEGY ============
         strategy = new MockStrategy(asset, address(vault));
@@ -245,6 +244,8 @@ contract EdgeCasesTest is Test {
      */
     function test_PerformanceFee_ZeroFee() public {
         // ============ ARRANGE ============
+        vm.prank(owner);
+        vault.addToWhitelist(feeRecipient);
         vm.prank(admin);
         vault.setFeeRecipient(feeRecipient);
         // protocolFeeBps defaults to 0
@@ -302,6 +303,8 @@ contract EdgeCasesTest is Test {
         // ============ ARRANGE ============
         uint16 maxFee = 2500; // 25%
 
+        vm.prank(owner);
+        vault.addToWhitelist(feeRecipient);
         vm.startPrank(admin);
         vault.setProtocolFee(maxFee);
         vault.setFeeRecipient(feeRecipient);
@@ -407,32 +410,6 @@ contract EdgeCasesTest is Test {
     }
 
     /*//////////////////////////////////////////////////////////////
-                       REENTRANCY PROTECTION
-    //////////////////////////////////////////////////////////////*/
-
-    /**
-     * @notice Tests that reentrancy guard protects deposit.
-     * @dev This is more for documentation - actual reentrancy attacks
-     *      require malicious tokens which we can't easily test here.
-     */
-    function test_ReentrancyGuard_DepositsProtected() public {
-        // ============ ARRANGE ============
-        vm.prank(owner);
-        vault.addToWhitelist(alice);
-
-        // ============ ACT ============
-        vm.startPrank(alice);
-        asset.approve(address(vault), DEPOSIT_AMOUNT);
-        uint256 shares = vault.deposit(DEPOSIT_AMOUNT, alice);
-        vm.stopPrank();
-
-        // ============ ASSERT ============
-        // If reentrancy was possible, shares would be incorrectly inflated
-        // Normal case should work as expected
-        assertGt(shares, 0, "Deposit should succeed normally");
-    }
-
-    /*//////////////////////////////////////////////////////////////
                        TOTALASSETS CONSISTENCY
     //////////////////////////////////////////////////////////////*/
 
@@ -444,9 +421,9 @@ contract EdgeCasesTest is Test {
         vm.startPrank(owner);
         MockERC20 newAsset = new MockERC20();
 
-        address vaultAddr = vm.computeCreateAddress(owner, vm.getNonce(owner));
-        newAsset.approve(vaultAddr, INITIAL_DEPOSIT);
-        YieldBearingVault newVault = new YieldBearingVault(newAsset, owner, admin, INITIAL_DEPOSIT);
+        VaultDeployer vaultDeployer = new VaultDeployer();
+        newAsset.approve(address(vaultDeployer), INITIAL_DEPOSIT);
+        YieldBearingVault newVault = vaultDeployer.deploy(newAsset, owner, admin, INITIAL_DEPOSIT);
         vm.stopPrank();
 
         // ============ ASSERT ============

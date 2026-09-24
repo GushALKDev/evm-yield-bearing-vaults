@@ -5,6 +5,7 @@ import {Test, console} from "forge-std/Test.sol";
 import {YieldBearingVault} from "../../src/vaults/YieldBearingVault.sol";
 import {MockStrategy} from "../mocks/MockStrategy.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {VaultDeployer} from "../utils/VaultDeployer.sol";
 
 /**
  * @title MockERC20
@@ -23,7 +24,6 @@ contract MockERC20 is ERC20 {
  *      using a MockStrategy that doesn't interact with external protocols.
  */
 contract YieldFlowTest is Test {
-
     /*//////////////////////////////////////////////////////////////
                                STATE
     //////////////////////////////////////////////////////////////*/
@@ -81,10 +81,9 @@ contract YieldFlowTest is Test {
         asset = new MockERC20();
 
         // ============ DEPLOY VAULT ============
-        // Pre-compute vault address to approve initial deposit before deployment
-        address vaultAddr = vm.computeCreateAddress(owner, vm.getNonce(owner));
-        asset.approve(vaultAddr, INITIAL_DEPOSIT_DEAD);
-        vault = new YieldBearingVault(asset, owner, owner, INITIAL_DEPOSIT_DEAD);
+        VaultDeployer vaultDeployer = new VaultDeployer();
+        asset.approve(address(vaultDeployer), INITIAL_DEPOSIT_DEAD);
+        vault = vaultDeployer.deploy(asset, owner, owner, INITIAL_DEPOSIT_DEAD);
 
         // ============ DEPLOY & CONNECT STRATEGY ============
         strategy = new MockStrategy(asset, address(vault));
@@ -135,10 +134,7 @@ contract YieldFlowTest is Test {
         // ============ ASSERT: YIELD REFLECTED IN TOTAL ASSETS ============
         // Total = User Deposit + Yield + Dead Buffer
         assertApproxEqAbs(
-            vault.totalAssets(),
-            DEPOSIT_AMOUNT + YIELD_AMOUNT_10_PERCENT + INITIAL_DEPOSIT_DEAD,
-            3,
-            "Total assets should include yield and dead assets"
+            vault.totalAssets(), DEPOSIT_AMOUNT + YIELD_AMOUNT_10_PERCENT + INITIAL_DEPOSIT_DEAD, 3, "Total assets should include yield and dead assets"
         );
 
         // ============ ACT: FULL WITHDRAWAL ============
@@ -148,9 +144,7 @@ contract YieldFlowTest is Test {
 
         // ============ ASSERT: ALICE RECEIVED PRINCIPAL + YIELD ============
         // Alice should have original balance + yield (minus ~200 wei dust for dead shares)
-        assertApproxEqAbs(
-            asset.balanceOf(alice), INITIAL_SUPPLY_ALICE + YIELD_AMOUNT_10_PERCENT, 200, "Alice should have profit"
-        );
+        assertApproxEqAbs(asset.balanceOf(alice), INITIAL_SUPPLY_ALICE + YIELD_AMOUNT_10_PERCENT, 200, "Alice should have profit");
         // Vault retains dead shares worth of assets
         assertGe(vault.totalAssets(), INITIAL_DEPOSIT_DEAD, "Vault should hold dead assets after exit");
     }
@@ -242,6 +236,7 @@ contract YieldFlowTest is Test {
         address feeRecipient = makeAddr("feeRecipient");
 
         vm.startPrank(owner);
+        vault.addToWhitelist(feeRecipient);
         vault.setFeeRecipient(feeRecipient);
         vault.setProtocolFee(1000); // 10% performance fee (1000 bps)
         vm.stopPrank();

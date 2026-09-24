@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {YieldBearingVault} from "../../src/vaults/YieldBearingVault.sol";
 import {MockStrategy} from "../mocks/MockStrategy.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {VaultDeployer} from "../utils/VaultDeployer.sol";
 
 contract MockERC20 is ERC20 {
     constructor() ERC20("Mock Token", "MOCK") {
@@ -22,7 +23,6 @@ contract MockERC20 is ERC20 {
  * @dev Tests vault operations with randomized inputs to discover edge cases.
  */
 contract BaseVaultFuzzTest is Test {
-
     /*//////////////////////////////////////////////////////////////
                                STATE
     //////////////////////////////////////////////////////////////*/
@@ -55,9 +55,9 @@ contract BaseVaultFuzzTest is Test {
         vm.startPrank(owner);
         asset = new MockERC20();
 
-        address vaultAddr = vm.computeCreateAddress(owner, vm.getNonce(owner));
-        asset.approve(vaultAddr, INITIAL_DEPOSIT);
-        vault = new YieldBearingVault(asset, owner, admin, INITIAL_DEPOSIT);
+        VaultDeployer vaultDeployer = new VaultDeployer();
+        asset.approve(address(vaultDeployer), INITIAL_DEPOSIT);
+        vault = vaultDeployer.deploy(asset, owner, admin, INITIAL_DEPOSIT);
 
         strategy = new MockStrategy(asset, address(vault));
         vm.stopPrank();
@@ -65,6 +65,8 @@ contract BaseVaultFuzzTest is Test {
         vm.prank(admin);
         vault.setStrategy(strategy);
 
+        vm.prank(owner);
+        vault.addToWhitelist(feeRecipient);
         vm.prank(admin);
         vault.setFeeRecipient(feeRecipient);
     }
@@ -431,11 +433,7 @@ contract BaseVaultFuzzTest is Test {
             vm.stopPrank();
         }
 
-        assertEq(
-            vault.totalSupply(),
-            vault.balanceOf(user) + vault.balanceOf(DEAD_ADDRESS),
-            "Total supply should equal user + dead shares"
-        );
+        assertEq(vault.totalSupply(), vault.balanceOf(user) + vault.balanceOf(DEAD_ADDRESS), "Total supply should equal user + dead shares");
     }
 
     /**
@@ -459,11 +457,6 @@ contract BaseVaultFuzzTest is Test {
         uint256 vaultAssets = vault.totalAssets();
         uint256 strategyAssets = strategy.totalAssets();
 
-        assertApproxEqAbs(
-            vaultAssets,
-            strategyAssets + INITIAL_DEPOSIT,
-            10,
-            "Vault assets should equal strategy assets + buffer"
-        );
+        assertApproxEqAbs(vaultAssets, strategyAssets + INITIAL_DEPOSIT, 10, "Vault assets should equal strategy assets + buffer");
     }
 }

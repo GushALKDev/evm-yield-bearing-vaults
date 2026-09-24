@@ -6,6 +6,8 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {YieldBearingVault} from "../../src/vaults/YieldBearingVault.sol";
 import {AaveSimpleLendingStrategy} from "../../src/strategies/AaveSimpleLendingStrategy.sol";
 import {Constants} from "../../src/utils/Constants.sol";
+import {ForkConfig} from "../utils/ForkConfig.sol";
+import {VaultDeployer} from "../utils/VaultDeployer.sol";
 
 /**
  * @title AaveSimpleStrategyForkTest
@@ -87,7 +89,7 @@ contract AaveSimpleStrategyForkTest is Test {
         owner = makeAddr("owner");
 
         // ============ FORK MAINNET ============
-        vm.createSelectFork(vm.envString("ETHEREUM_MAINNET_RPC"));
+        ForkConfig.selectMainnetFork();
 
         usdc = IERC20(USDC);
         aUsdc = IERC20(A_USDC);
@@ -99,10 +101,9 @@ contract AaveSimpleStrategyForkTest is Test {
         // ============ DEPLOY VAULT ============
         vm.startPrank(owner);
 
-        // Pre-compute vault address to approve initial deposit
-        address vaultAddr = vm.computeCreateAddress(owner, vm.getNonce(owner));
-        usdc.approve(vaultAddr, REQUIRED_DEPOSIT);
-        vault = new YieldBearingVault(usdc, owner, owner, REQUIRED_DEPOSIT);
+        VaultDeployer vaultDeployer = new VaultDeployer();
+        usdc.approve(address(vaultDeployer), REQUIRED_DEPOSIT);
+        vault = vaultDeployer.deploy(usdc, owner, owner, REQUIRED_DEPOSIT);
 
         // ============ DEPLOY STRATEGY ============
         strategy = new AaveSimpleLendingStrategy(usdc, address(vault), AAVE_POOL, A_USDC);
@@ -145,19 +146,13 @@ contract AaveSimpleStrategyForkTest is Test {
 
         // ============ ASSERT: SHARE OWNERSHIP INVARIANTS ============
         // Vault shares = Alice + Dead
-        assertEq(
-            vault.totalSupply(),
-            vault.balanceOf(alice) + vault.balanceOf(DEAD_ADDRESS),
-            "Vault Total Supply Invariant"
-        );
+        assertEq(vault.totalSupply(), vault.balanceOf(alice) + vault.balanceOf(DEAD_ADDRESS), "Vault Total Supply Invariant");
         // Strategy shares = Vault's holdings
         assertEq(strategy.totalSupply(), strategy.balanceOf(address(vault)), "Strategy Total Supply Invariant");
 
         // ============ ASSERT: MANAGED ASSETS INVARIANT ============
         // Vault assets = Strategy assets + Buffer
-        assertApproxEqAbs(
-            vault.totalAssets(), strategy.totalAssets() + REQUIRED_DEPOSIT, 2, "Vault vs Strategy Assets Invariant"
-        );
+        assertApproxEqAbs(vault.totalAssets(), strategy.totalAssets() + REQUIRED_DEPOSIT, 2, "Vault vs Strategy Assets Invariant");
 
         _logState("Deposit");
     }
@@ -200,11 +195,7 @@ contract AaveSimpleStrategyForkTest is Test {
 
         // ============ ASSERT: ALICE BALANCE ============
         // Alice should have: Initial - Deposit + Withdrawn
-        assertEq(
-            usdc.balanceOf(alice),
-            ALICE_INITIAL_BALANCE - DEPOSIT_AMOUNT + withdrawAmount,
-            "Alice should have correct USDC balance"
-        );
+        assertEq(usdc.balanceOf(alice), ALICE_INITIAL_BALANCE - DEPOSIT_AMOUNT + withdrawAmount, "Alice should have correct USDC balance");
 
         // ============ ASSERT: ALICE SHARES (PROFIT RETENTION) ============
         // Alice keeps more shares than half due to yield
@@ -215,11 +206,7 @@ contract AaveSimpleStrategyForkTest is Test {
         assertEq(usdc.balanceOf(address(vault)), 0, "Vault should hold 0 underlying (buffer used)");
         assertEq(usdc.balanceOf(address(strategy)), 0, "Strategy should hold 0 underlying");
 
-        assertEq(
-            vault.totalSupply(),
-            vault.balanceOf(alice) + vault.balanceOf(DEAD_ADDRESS),
-            "Vault Total Supply Invariant"
-        );
+        assertEq(vault.totalSupply(), vault.balanceOf(alice) + vault.balanceOf(DEAD_ADDRESS), "Vault Total Supply Invariant");
         assertEq(strategy.totalSupply(), strategy.balanceOf(address(vault)), "Strategy Total Supply Invariant");
 
         assertApproxEqAbs(vault.totalAssets(), strategy.totalAssets(), 1, "Vault vs Strategy Assets Invariant");
@@ -268,11 +255,7 @@ contract AaveSimpleStrategyForkTest is Test {
         uint256 aliceBalance = usdc.balanceOf(alice);
 
         // Alice should receive more than just principal back
-        assertGt(
-            aliceBalance,
-            ALICE_INITIAL_BALANCE - DEPOSIT_AMOUNT + expectedPrincipal,
-            "Alice should receive principal + yield"
-        );
+        assertGt(aliceBalance, ALICE_INITIAL_BALANCE - DEPOSIT_AMOUNT + expectedPrincipal, "Alice should receive principal + yield");
 
         // ============ ASSERT: REMAINING SHARES ============
         // Alice should have exactly half her shares remaining
@@ -282,11 +265,7 @@ contract AaveSimpleStrategyForkTest is Test {
         assertEq(usdc.balanceOf(address(vault)), 0, "Vault should hold 0 underlying (buffer used)");
         assertEq(usdc.balanceOf(address(strategy)), 0, "Strategy should hold 0 underlying");
 
-        assertEq(
-            vault.totalSupply(),
-            vault.balanceOf(alice) + vault.balanceOf(DEAD_ADDRESS),
-            "Vault Total Supply Invariant"
-        );
+        assertEq(vault.totalSupply(), vault.balanceOf(alice) + vault.balanceOf(DEAD_ADDRESS), "Vault Total Supply Invariant");
         assertEq(strategy.totalSupply(), strategy.balanceOf(address(vault)), "Strategy Total Supply Invariant");
 
         assertApproxEqAbs(vault.totalAssets(), strategy.totalAssets(), 1, "Vault vs Strategy Assets Invariant");

@@ -3,6 +3,7 @@ pragma solidity 0.8.26;
 
 import {Test} from "forge-std/Test.sol";
 import {StdInvariant} from "forge-std/StdInvariant.sol";
+import {ForkConfig} from "../utils/ForkConfig.sol";
 
 /**
  * @title InvariantBase
@@ -56,7 +57,6 @@ abstract contract InvariantBase is StdInvariant, Test {
     }
 
     function _createFork() internal {
-        string memory rpc = vm.envString("ETHEREUM_MAINNET_RPC");
-        vm.createSelectFork(rpc);
+        ForkConfig.selectMainnetFork();
     }
 }

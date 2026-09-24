@@ -9,6 +9,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IPool} from "../interfaces/aave/IPool.sol";
 import {Currency, CurrencyLibrary} from "v4-core/src/types/Currency.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 /**
  * @title WETHLoopStrategy
@@ -34,7 +35,14 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
     address public immutable AAVE_POOL;
     address public immutable A_TOKEN;
     address public immutable VARIABLE_DEBT_TOKEN;
+    /**
+     * @dev Trip threshold: checkHealth() activates emergency mode below it, and every investment must stay at or above it.
+     */
     uint256 public minHealthFactor;
+
+    /**
+     * @dev Re-arm threshold: reinvest() reverts unless the position ends at or above it. Not used by deposits.
+     */
     uint256 public targetHealthFactor;
 
     /**
@@ -42,12 +50,53 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
      */
     uint8 public targetLeverage;
 
+    /**
+     * @dev A withdrawal that would leave less equity than this closes the whole position instead.
+     *      Aave values debt rounding up and collateral rounding down in its 8-decimal base currency, so a dust
+     *      position (for example 10,000 wei collateral / 9,000 wei debt) has a health factor of 0 and the
+     *      collateral withdrawal reverts. 1e12 wei keeps the remaining debt at thousands of base units or more
+     *      for any ETH price above 1 USD.
+     */
+    uint256 public constant MIN_REMAINING_EQUITY = 1e12;
+
+    /**
+     * @dev Smaller amounts are not invested and stay as idle WETH: counted by totalAssets(), paid out first on
+     *      withdrawals and invested by reinvest() once the idle balance reaches this bound. Same rounding reason as
+     *      MIN_REMAINING_EQUITY: without an existing position, investing 1,000 wei at 10x reverts in Aave.
+     */
+    uint256 public constant MIN_INVEST_ASSETS = MIN_REMAINING_EQUITY;
+
+    /**
+     * @dev Aave liquidates at a health factor below 1e18, so minHealthFactor must be strictly above it.
+     */
+    uint256 public constant HEALTH_FACTOR_FLOOR = 1e18;
+
+    /**
+     * @dev Safety margin (0.1%) applied by maxDeposit() and maxMint() to the health factors they compare with
+     *      minHealthFactor. Aave values collateral rounding down and debt rounding up in its 8-decimal base currency,
+     *      so a real position sits slightly below L * LT / (L - 1). The smallest slice that is invested is
+     *      MIN_INVEST_ASSETS (1e12 wei); its debt is at least 1e12 wei, worth 100 * P base units at a WETH price of
+     *      P USD, so the rounding costs at most about 3 / (100 * P) of the health factor: under 0.1% for P above 30 USD.
+     */
+    uint256 public constant HEALTH_FACTOR_MARGIN_BPS = 10;
+
+    uint256 private constant BPS = 10_000;
+
+    /**
+     * @dev Gas that exitPosition() receives before emergency mode can be activated. Measured at the pinned fork block
+     *      with isolated transactions (cold storage), independent of the position size: 243,113 through checkHealth()
+     *      (GasBenchmarkForkTest.test_Gas_CheckHealthEmergencyDivest) and 288,613 through the admin activation
+     *      (EmergencyActivationForkTest.test_AdminEmergency_WethLoop_ClosesPositionAndAllowsRedeem), both read from
+     *      `forge test --match-test <test> --isolate -vvvv`. 450,000 adds about 56% for Aave and Uniswap upgrades.
+     */
+    uint256 public constant EXIT_GAS = 450_000;
+
     /*//////////////////////////////////////////////////////////////
                                  ERRORS
     //////////////////////////////////////////////////////////////*/
 
     error InvalidLeverage();
-    error InvalidHealthFactors();
+    error InvalidHealthFactors(uint256 minHealthFactor, uint256 targetHealthFactor);
     error BorrowedAmountMismatch(uint256 borrowed, uint256 expected);
     error InsufficientEquity();
     error WithdrawExceedsEquity(uint256 requested, uint256 available);
@@ -56,6 +105,8 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
     error InsufficientAaveWithdrawal(uint256 withdrawn, uint256 requested);
     error InsufficientAaveRepayment(uint256 repaid, uint256 requested);
     error StrategyNotHarvestable();
+    error HealthFactorBelowTarget(uint256 healthFactor, uint256 targetHealthFactor);
+    error HealthFactorBelowMinimum(uint256 healthFactor, uint256 minHealthFactor);
 
     /*//////////////////////////////////////////////////////////////
                                CONSTRUCTOR
@@ -70,8 +121,8 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
      * @param _aToken The aWETH token address.
      * @param _variableDebtToken The variable debt WETH token address.
      * @param _targetLeverage Target leverage multiplier (minimum 2x).
-     * @param _minHealthFactor Minimum health factor threshold (1e18 scale).
-     * @param _targetHealthFactor Target health factor to maintain (1e18 scale).
+     * @param _minHealthFactor Health factor below which checkHealth() triggers emergency mode (1e18 scale, > 1e18).
+     * @param _targetHealthFactor Minimum health factor after reinvest() (1e18 scale, > _minHealthFactor).
      * @param _eModeCategoryId Aave E-Mode category (1 for ETH-correlated).
      */
     constructor(
@@ -93,7 +144,9 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
         if (_targetLeverage < 2) revert InvalidLeverage();
         targetLeverage = _targetLeverage;
 
-        if (_minHealthFactor >= _targetHealthFactor) revert InvalidHealthFactors();
+        if (_minHealthFactor <= HEALTH_FACTOR_FLOOR || _minHealthFactor >= _targetHealthFactor) {
+            revert InvalidHealthFactors(_minHealthFactor, _targetHealthFactor);
+        }
         minHealthFactor = _minHealthFactor;
         targetHealthFactor = _targetHealthFactor;
         E_MODE_CATEGORY_ID = _eModeCategoryId;
@@ -111,8 +164,11 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
         emit LeverageSet(_targetLeverage);
     }
 
+    /**
+     * @notice Sets the trip threshold (minHealthFactor) and the reinvest() re-arm threshold (targetHealthFactor).
+     */
     function setHealthFactors(uint256 _min, uint256 _target) external onlyVaultAdmin {
-        if (_min >= _target) revert InvalidHealthFactors();
+        if (_min <= HEALTH_FACTOR_FLOOR || _min >= _target) revert InvalidHealthFactors(_min, _target);
         minHealthFactor = _min;
         targetHealthFactor = _target;
         emit HealthFactorsSet(_min, _target);
@@ -129,9 +185,15 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
     //////////////////////////////////////////////////////////////*/
 
     /**
-     * @dev Calculates flash loan amount needed to reach target leverage.
+     * @dev Calculates flash loan amount needed to reach target leverage. Only `assets` is supplied: idle WETH is
+     *      invested by reinvest(), which checks the resulting health factor. Reverts if the position ends below
+     *      minHealthFactor, so a deposit never opens a position that checkHealth() would close right away.
+     *      Amounts below MIN_INVEST_ASSETS stay idle.
      */
     function _invest(uint256 assets) internal override {
+        // Checks
+        if (assets < MIN_INVEST_ASSETS) return;
+
         uint256 principal = assets;
         // Gas: unchecked safe, overflow impossible (principal bounded by token supply, leverage max 255)
         uint256 flashAmount;
@@ -142,26 +204,39 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
         address assetAddr = asset();
 
         if (flashAmount > 0) {
-            flashLoan(Currency.wrap(assetAddr), flashAmount, bytes(""));
+            flashLoan(Currency.wrap(assetAddr), flashAmount, abi.encode(false, principal));
         } else {
             AaveAdapter.supply(AAVE_POOL, assetAddr, principal);
         }
+
+        // Invariants
+        //slither-disable-next-line unused-return
+        (,,,,, uint256 healthFactor) = IPool(AAVE_POOL).getUserAccountData(address(this));
+        uint256 minimum = minHealthFactor;
+        if (healthFactor < minimum) revert HealthFactorBelowMinimum(healthFactor, minimum);
     }
 
     /**
-     * @dev Deleverages position proportionally using flash loan.
+     * @dev Pays from idle WETH first, then deleverages the position proportionally using a flash loan.
      */
     function _divest(uint256 assets) internal override {
         // Checks
+        // Gas: cache asset to avoid repeated calls
+        address assetAddr = asset();
+
+        uint256 idle = IERC20(assetAddr).balanceOf(address(this));
+        if (idle >= assets) return;
+        // Gas: unchecked safe (idle < assets checked above)
+        unchecked {
+            assets -= idle;
+        }
+
         uint256 totalCollateral = IERC20(A_TOKEN).balanceOf(address(this));
         uint256 totalDebt = IERC20(VARIABLE_DEBT_TOKEN).balanceOf(address(this));
 
         //slither-disable-next-line incorrect-equality
         // Legitimate check: ERC20 balance can be exactly zero (empty position)
         if (totalCollateral == 0) return;
-
-        // Gas: cache asset to avoid repeated calls
-        address assetAddr = asset();
 
         //slither-disable-next-line incorrect-equality
         // Legitimate check: no debt means no leverage, simple withdrawal
@@ -182,9 +257,23 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
         if (assets > netEquity) revert WithdrawExceedsEquity(assets, netEquity);
 
         // Effects
-        // Calculate proportional amounts directly to avoid precision loss
-        uint256 debtToRepay = (totalDebt * assets) / netEquity;
-        uint256 collateralToWithdraw = (totalCollateral * assets) / netEquity;
+        uint256 debtToRepay;
+        uint256 collateralToWithdraw;
+        // Gas: unchecked safe (assets <= netEquity validated above)
+        uint256 remainingEquity;
+        unchecked {
+            remainingEquity = netEquity - assets;
+        }
+        if (remainingEquity < MIN_REMAINING_EQUITY) {
+            // Close fully; any equity above `assets` stays as idle WETH, counted by totalAssets()
+            debtToRepay = totalDebt;
+            collateralToWithdraw = totalCollateral;
+        } else {
+            // Debt rounds up so the remaining position is never more leveraged than before.
+            // Collateral is derived from it so the remaining equity is exactly netEquity - assets.
+            debtToRepay = Math.mulDiv(totalDebt, assets, netEquity, Math.Rounding.Ceil);
+            collateralToWithdraw = debtToRepay + assets;
+        }
 
         // Interactions
         flashLoan(Currency.wrap(assetAddr), debtToRepay, abi.encode(true, collateralToWithdraw));
@@ -196,22 +285,21 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
     function _onFlashLoan(Currency currency, uint256 amount, bytes memory data) internal override {
         address underlying = Currency.unwrap(currency);
 
-        if (data.length == 0) {
-            _onFlashLoanInvest(underlying, amount);
+        // Invest: principal. Divest: collateral to withdraw.
+        (bool isDivest, uint256 param) = abi.decode(data, (bool, uint256));
+        if (isDivest) {
+            _onFlashLoanDivest(underlying, amount, param);
         } else {
-            (bool isDivest, uint256 collateralToWithdraw) = abi.decode(data, (bool, uint256));
-            if (isDivest) {
-                _onFlashLoanDivest(underlying, amount, collateralToWithdraw);
-            }
+            _onFlashLoanInvest(underlying, amount, param);
         }
     }
 
     /**
      * @dev Invests by supplying principal + flash loan to Aave, then borrows to repay flash.
      */
-    function _onFlashLoanInvest(address underlying, uint256 flashAmount) internal {
+    function _onFlashLoanInvest(address underlying, uint256 flashAmount, uint256 principal) internal {
         // Checks
-        uint256 totalToSupply = IERC20(underlying).balanceOf(address(this));
+        uint256 totalToSupply = principal + flashAmount;
 
         // Interactions
         address pool = AAVE_POOL;
@@ -247,11 +335,11 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
     }
 
     /**
-     * @notice Checks strategy health and triggers emergency divest if needed.
-     * @dev If healthFactor < minHealthFactor:
-     *      1. Divests entire position to close leverage
-     *      2. Activates emergency mode on vault to block new deposits
-     *      3. Returns false to signal health check failure
+     * @notice Checks strategy health and triggers an emergency divest if needed.
+     * @dev If healthFactor < minHealthFactor, activates emergency mode on the vault. The vault propagates it to
+     *      this strategy, whose setEmergencyMode() closes the position (see BaseStrategy). If the position is
+     *      still open because an earlier exit failed, calling this again retries the exit only while the health
+     *      factor is still below minHealthFactor; otherwise it returns true and the admin retries it instead.
      * @return healthy True if health factor is acceptable, false otherwise.
      */
     function checkHealth() external override returns (bool healthy) {
@@ -264,19 +352,70 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
             return true;
         }
 
-        // Effects & Interactions: Emergency divest and activate emergency mode
-        _emergencyDivest();
+        // Interactions: activation blocks deposits and closes the position
+        BaseVault(VAULT).activateEmergencyMode();
 
         return false;
     }
 
     /**
-     * @dev Emergency divest: closes entire leveraged position and activates vault emergency mode.
+     * @dev Re-arms only into a position at or above targetHealthFactor, while checkHealth() trips below
+     *      minHealthFactor. The check covers the whole position; with no debt Aave reports type(uint256).max.
      */
-    function _emergencyDivest() internal {
-        // Effects: Activate emergency mode on vault first
-        BaseVault(VAULT).activateEmergencyMode();
+    function _reinvest() internal override {
+        // Interactions
+        super._reinvest();
 
+        // Invariants
+        //slither-disable-next-line unused-return
+        (,,,,, uint256 healthFactor) = IPool(AAVE_POOL).getUserAccountData(address(this));
+        uint256 target = targetHealthFactor;
+        if (healthFactor < target) revert HealthFactorBelowTarget(healthFactor, target);
+    }
+
+    /**
+     * @dev Idle WETH plus the most _divest() can take from the position now, mirroring its two paths:
+     *      - full close (the remaining equity would be below MIN_REMAINING_EQUITY): flash loan of the whole debt, so
+     *        it needs debt <= PoolManager liquidity and equity <= Aave liquidity (the repay adds the debt back);
+     *      - proportional deleverage of n: flash loan of ceil(debt * n / equity) <= PoolManager liquidity, n <= Aave
+     *        liquidity, and n <= equity - MIN_REMAINING_EQUITY.
+     *      Nothing is taken from the position while Aave's reserve is paused, while collateral <= debt
+     *      (InsufficientEquity) or while the health factor is below 1 (Aave rejects the collateral withdrawal).
+     */
+    function _withdrawableAssets() internal view override returns (uint256) {
+        address assetAddr = asset();
+        uint256 idle = IERC20(assetAddr).balanceOf(address(this));
+        uint256 collateral = IERC20(A_TOKEN).balanceOf(address(this));
+        //slither-disable-next-line incorrect-equality
+        if (collateral == 0) return idle;
+
+        uint256 aaveLiquidity = AaveAdapter.withdrawableLiquidity(AAVE_POOL, assetAddr);
+        uint256 debt = IERC20(VARIABLE_DEBT_TOKEN).balanceOf(address(this));
+        //slither-disable-next-line incorrect-equality
+        if (debt == 0) return idle + Math.min(collateral, aaveLiquidity);
+        if (collateral <= debt) return idle;
+
+        //slither-disable-next-line unused-return
+        (,,,,, uint256 healthFactor) = IPool(AAVE_POOL).getUserAccountData(address(this));
+        if (healthFactor < HEALTH_FACTOR_FLOOR) return idle;
+
+        uint256 equity = collateral - debt;
+        uint256 flashLiquidity = IERC20(assetAddr).balanceOf(address(POOL_MANAGER));
+        if (debt <= flashLiquidity && equity <= aaveLiquidity) return idle + equity;
+        if (equity <= MIN_REMAINING_EQUITY) return idle;
+
+        uint256 partialLimit = Math.min(equity - MIN_REMAINING_EQUITY, flashLiquidity * equity / debt);
+        return idle + Math.min(partialLimit, aaveLiquidity);
+    }
+
+    function _exitGas() internal pure override returns (uint256) {
+        return EXIT_GAS;
+    }
+
+    /**
+     * @dev Emergency divest: repays all debt with a flash loan and withdraws all collateral to idle WETH.
+     */
+    function _exitPosition() internal override {
         // Checks
         uint256 totalCollateral = IERC20(A_TOKEN).balanceOf(address(this));
         uint256 totalDebt = IERC20(VARIABLE_DEBT_TOKEN).balanceOf(address(this));
@@ -302,17 +441,75 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
     }
 
     /**
-     * @dev Returns net equity (collateral - debt).
+     * @dev 0 when a deposit could revert with HealthFactorBelowMinimum, see _investmentKeepsMinimum().
+     */
+    function maxDeposit(address receiver) public view override returns (uint256) {
+        if (!_investmentKeepsMinimum()) return 0;
+        return super.maxDeposit(receiver);
+    }
+
+    /**
+     * @dev 0 when a mint could revert with HealthFactorBelowMinimum, see _investmentKeepsMinimum().
+     */
+    function maxMint(address receiver) public view override returns (uint256) {
+        if (!_investmentKeepsMinimum()) return 0;
+        return super.maxMint(receiver);
+    }
+
+    /**
+     * @dev Whether any investment keeps the position at or above minHealthFactor, without simulating it. With one
+     *      collateral and one debt asset the health factor is collateral * LT / debt, so the position after an
+     *      investment is the mediant of the existing position and the invested slice: if both are at or above
+     *      minHealthFactor, so is the result. The existing position is read from Aave (only when it has debt;
+     *      without debt Aave reports type(uint256).max). The slice is built at targetLeverage, so its health factor
+     *      is L * LT / (L - 1) with the live liquidation threshold. Both values are reduced by
+     *      HEALTH_FACTOR_MARGIN_BPS to cover Aave's rounding, so the answer can be false when an investment would
+     *      succeed, never true when it would revert. Slices below MIN_INVEST_ASSETS are not invested and never revert.
+     */
+    function _investmentKeepsMinimum() internal view returns (bool) {
+        uint256 minimum = minHealthFactor;
+
+        // Existing position
+        if (IERC20(VARIABLE_DEBT_TOKEN).balanceOf(address(this)) > 0) {
+            //slither-disable-next-line unused-return
+            (,,,,, uint256 healthFactor) = IPool(AAVE_POOL).getUserAccountData(address(this));
+            if (_applyMargin(healthFactor) < minimum) return false;
+        }
+
+        // New slice at target leverage: L * LT / (L - 1), LT in bps scaled to 1e18
+        uint256 leverage = targetLeverage;
+        uint256 impliedHealthFactor = leverage * _liquidationThreshold() * 1e14 / (leverage - 1);
+        return _applyMargin(impliedHealthFactor) >= minimum;
+    }
+
+    /**
+     * @dev Liquidation threshold in bps that Aave applies to the WETH collateral: the E-Mode category's when one is
+     *      set, otherwise the reserve's (bits 16-31 of its configuration).
+     */
+    function _liquidationThreshold() internal view returns (uint256) {
+        uint8 categoryId = E_MODE_CATEGORY_ID;
+        if (categoryId > 0) return IPool(AAVE_POOL).getEModeCategoryCollateralConfig(categoryId).liquidationThreshold;
+        return (IPool(AAVE_POOL).getConfiguration(asset()) >> 16) & 0xFFFF;
+    }
+
+    function _applyMargin(uint256 healthFactor) internal pure returns (uint256) {
+        return healthFactor * (BPS - HEALTH_FACTOR_MARGIN_BPS) / BPS;
+    }
+
+    /**
+     * @dev Returns net equity: collateral + idle WETH - debt - outstanding flash loan.
+     *      Idle WETH is what an emergency divest leaves in the strategy. The outstanding flash loan
+     *      is subtracted so borrowed WETH is not counted as equity while a loan is open.
      */
     function totalAssets() public view override returns (uint256) {
-        uint256 totalCollateral = IERC20(A_TOKEN).balanceOf(address(this));
-        uint256 totalDebt = IERC20(VARIABLE_DEBT_TOKEN).balanceOf(address(this));
+        uint256 assets = IERC20(A_TOKEN).balanceOf(address(this)) + IERC20(asset()).balanceOf(address(this));
+        uint256 liabilities = IERC20(VARIABLE_DEBT_TOKEN).balanceOf(address(this)) + _flashLoanOutstanding();
 
-        if (totalCollateral <= totalDebt) return 0;
+        if (assets <= liabilities) return 0;
 
-        // Gas: unchecked safe (already checked totalCollateral > totalDebt)
+        // Gas: unchecked safe (already checked assets > liabilities)
         unchecked {
-            return totalCollateral - totalDebt;
+            return assets - liabilities;
         }
     }
 }

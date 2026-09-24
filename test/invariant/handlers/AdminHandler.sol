@@ -3,6 +3,8 @@ pragma solidity 0.8.26;
 
 import {Test} from "forge-std/Test.sol";
 import {YieldBearingVault} from "../../../src/vaults/YieldBearingVault.sol";
+import {WETHLoopStrategy} from "../../../src/strategies/WETHLoopStrategy.sol";
+import {IPool} from "../../../src/interfaces/aave/IPool.sol";
 
 /**
  * @title AdminHandler
@@ -18,6 +20,11 @@ contract AdminHandler is Test {
     uint256 public ghost_whitelistRemovals;
     uint256 public ghost_feeChanges;
     uint256 public ghost_emergencyModeChanges;
+    uint256 public ghost_reinvests;
+    uint256 public ghost_feeRecipientChanges;
+    uint256 public ghost_feeRecipientRemovalAttempts;
+    /// @dev Successful reinvests that left the health factor below targetHealthFactor.
+    uint256 public ghost_reinvestsBelowTarget;
 
     /*//////////////////////////////////////////////////////////////
                                STATE
@@ -27,16 +34,19 @@ contract AdminHandler is Test {
     address public admin;
     address public owner;
     address[] public potentialUsers;
+    /// @dev Aave pool of a WETHLoopStrategy, or address(0) when the strategy has no health factor.
+    IPool public aavePool;
 
     /*//////////////////////////////////////////////////////////////
                              CONSTRUCTOR
     //////////////////////////////////////////////////////////////*/
 
-    constructor(YieldBearingVault _vault, address _admin, address _owner, address[] memory _potentialUsers) {
+    constructor(YieldBearingVault _vault, address _admin, address _owner, address[] memory _potentialUsers, IPool _aavePool) {
         vault = _vault;
         admin = _admin;
         owner = _owner;
         potentialUsers = _potentialUsers;
+        aavePool = _aavePool;
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -90,5 +100,47 @@ contract AdminHandler is Test {
         ghost_emergencyModeChanges++;
 
         assert(vault.emergencyMode() == !currentMode);
+    }
+
+    /**
+     * @notice Admin moves the fee to an actor; the call only succeeds for whitelisted actors.
+     */
+    function setFeeRecipient(uint256 userSeed) external {
+        address user = potentialUsers[userSeed % potentialUsers.length];
+
+        vm.prank(admin);
+        vault.setFeeRecipient(user);
+
+        ghost_feeRecipientChanges++;
+    }
+
+    /**
+     * @notice Owner tries to remove the current fee recipient from the whitelist; the call must revert.
+     */
+    function removeFeeRecipient() external {
+        address recipient = vault.feeRecipient();
+        if (recipient == address(0)) return;
+
+        ghost_feeRecipientRemovalAttempts++;
+
+        vm.prank(owner);
+        vault.removeFromWhitelist(recipient);
+    }
+
+    /**
+     * @notice Admin reinvests the strategy's idle assets and records the health factor after a successful call.
+     */
+    function reinvest() external {
+        if (vault.emergencyMode()) return;
+
+        vm.prank(admin);
+        vault.reinvest();
+
+        ghost_reinvests++;
+        if (address(aavePool) == address(0)) return;
+
+        address strategy = address(vault.strategy());
+        (,,,,, uint256 healthFactor) = aavePool.getUserAccountData(strategy);
+        if (healthFactor < WETHLoopStrategy(strategy).targetHealthFactor()) ghost_reinvestsBelowTarget++;
     }
 }

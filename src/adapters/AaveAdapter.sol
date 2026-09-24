@@ -50,4 +50,13 @@ library AaveAdapter {
         IERC20(asset).forceApprove(pool, amount);
         return IPool(pool).repay(asset, amount, 2, address(this));
     }
+
+    /**
+     * @dev Amount of `asset` the reserve can pay out, or 0 while the reserve is paused (bit 60 of its configuration),
+     *      since Aave then rejects every withdrawal.
+     */
+    function withdrawableLiquidity(address pool, address asset) internal view returns (uint256) {
+        if ((IPool(pool).getConfiguration(asset) >> 60) & 1 == 1) return 0;
+        return IPool(pool).getVirtualUnderlyingBalance(asset);
+    }
 }

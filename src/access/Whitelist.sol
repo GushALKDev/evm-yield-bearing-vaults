@@ -15,6 +15,7 @@ abstract contract Whitelist is Ownable {
 
     error NotWhitelisted(address account);
     error EmptyArray();
+    error RenounceOwnershipDisabled();
 
     /*//////////////////////////////////////////////////////////////
                                  EVENTS
@@ -64,8 +65,21 @@ abstract contract Whitelist is Ownable {
     function removeFromWhitelist(address account) external onlyOwner {
         // Skip if not whitelisted
         if (!isWhitelisted[account]) return;
+        _beforeRemoval(account);
         isWhitelisted[account] = false;
         emit WhitelistedRemoved(account);
+    }
+
+    /**
+     * @dev Hook for inheriting contracts to block the removal of an address. Default allows every removal.
+     */
+    function _beforeRemoval(address account) internal view virtual {}
+
+    /**
+     * @dev Disabled: without an owner the whitelist could never change again.
+     */
+    function renounceOwnership() public pure override {
+        revert RenounceOwnershipDisabled();
     }
 
     /// @notice Amortizes fixed tx costs (~23k per address) across batch
@@ -79,7 +93,9 @@ abstract contract Whitelist is Ownable {
                 isWhitelisted[account] = true;
                 emit WhitelistedAdded(account);
             }
-            unchecked { ++i; }
+            unchecked {
+                ++i;
+            }
         }
     }
 
@@ -91,10 +107,13 @@ abstract contract Whitelist is Ownable {
         for (uint256 i; i < length;) {
             address account = accounts[i];
             if (isWhitelisted[account]) {
+                _beforeRemoval(account);
                 isWhitelisted[account] = false;
                 emit WhitelistedRemoved(account);
             }
-            unchecked { ++i; }
+            unchecked {
+                ++i;
+            }
         }
     }
 }

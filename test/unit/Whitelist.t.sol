@@ -5,6 +5,8 @@ import {Test} from "forge-std/Test.sol";
 import {YieldBearingVault} from "../../src/vaults/YieldBearingVault.sol";
 import {MockStrategy} from "../mocks/MockStrategy.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {VaultDeployer} from "../utils/VaultDeployer.sol";
+import {Whitelist} from "../../src/access/Whitelist.sol";
 
 /**
  * @title MockERC20
@@ -17,12 +19,19 @@ contract MockERC20 is ERC20 {
 }
 
 /**
+ * @title WhitelistHarness
+ * @notice Whitelist without overrides, to test the default removal hook.
+ */
+contract WhitelistHarness is Whitelist {
+    constructor(address _owner) Whitelist(_owner) {}
+}
+
+/**
  * @title WhitelistTest
  * @notice Comprehensive tests for whitelist functionality.
  * @dev Tests whitelist enforcement on deposits, transfers, mints, and redemptions.
  */
 contract WhitelistTest is Test {
-
     /*//////////////////////////////////////////////////////////////
                                STATE
     //////////////////////////////////////////////////////////////*/
@@ -61,10 +70,9 @@ contract WhitelistTest is Test {
         // ============ DEPLOY MOCK ASSET ============
         asset = new MockERC20();
 
-        // ============ DEPLOY VAULT ============
-        address vaultAddr = vm.computeCreateAddress(owner, vm.getNonce(owner));
-        asset.approve(vaultAddr, INITIAL_DEPOSIT);
-        vault = new YieldBearingVault(asset, owner, admin, INITIAL_DEPOSIT);
+        VaultDeployer vaultDeployer = new VaultDeployer();
+        asset.approve(address(vaultDeployer), INITIAL_DEPOSIT);
+        vault = vaultDeployer.deploy(asset, owner, admin, INITIAL_DEPOSIT);
 
         // ============ DEPLOY & CONNECT STRATEGY ============
         strategy = new MockStrategy(asset, address(vault));
@@ -156,6 +164,82 @@ contract WhitelistTest is Test {
         assertTrue(vault.isWhitelisted(alice), "Alice should be whitelisted");
         assertTrue(vault.isWhitelisted(bob), "Bob should be whitelisted");
         assertTrue(vault.isWhitelisted(charlie), "Charlie should be whitelisted");
+    }
+
+    /**
+     * @notice Tests that addBatchToWhitelist adds every new address and skips the ones already whitelisted.
+     */
+    function test_AddBatchToWhitelist_Success() public {
+        // ============ ARRANGE ============
+        vm.prank(owner);
+        vault.addToWhitelist(alice);
+        address[] memory accounts = _accounts(alice, bob, charlie);
+
+        // ============ ACT ============
+        vm.recordLogs();
+        vm.prank(owner);
+        vault.addBatchToWhitelist(accounts);
+
+        // ============ ASSERT ============
+        assertEq(vm.getRecordedLogs().length, 2, "Only new addresses should emit WhitelistedAdded");
+        assertTrue(vault.isWhitelisted(alice), "Alice should stay whitelisted");
+        assertTrue(vault.isWhitelisted(bob), "Bob should be whitelisted");
+        assertTrue(vault.isWhitelisted(charlie), "Charlie should be whitelisted");
+    }
+
+    /**
+     * @notice Tests that removeBatchFromWhitelist removes every whitelisted address and skips the others.
+     */
+    function test_RemoveBatchFromWhitelist_Success() public {
+        // ============ ARRANGE ============
+        vm.startPrank(owner);
+        vault.addToWhitelist(alice);
+        vault.addToWhitelist(bob);
+        vm.stopPrank();
+        address[] memory accounts = _accounts(alice, bob, charlie);
+
+        // ============ ACT ============
+        vm.recordLogs();
+        vm.prank(owner);
+        vault.removeBatchFromWhitelist(accounts);
+
+        // ============ ASSERT ============
+        assertEq(vm.getRecordedLogs().length, 2, "Only whitelisted addresses should emit WhitelistedRemoved");
+        assertFalse(vault.isWhitelisted(alice), "Alice should be removed");
+        assertFalse(vault.isWhitelisted(bob), "Bob should be removed");
+        assertFalse(vault.isWhitelisted(charlie), "Charlie should stay not whitelisted");
+    }
+
+    /**
+     * @notice Tests that both batch functions reject an empty array.
+     */
+    function test_BatchWhitelist_RevertIfEmpty() public {
+        // ============ ACT & ASSERT ============
+        address[] memory empty = new address[](0);
+
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSignature("EmptyArray()"));
+        vault.addBatchToWhitelist(empty);
+
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSignature("EmptyArray()"));
+        vault.removeBatchFromWhitelist(empty);
+    }
+
+    /**
+     * @notice Tests that only the owner can call the batch functions.
+     */
+    function test_BatchWhitelist_RevertIfNotOwner() public {
+        // ============ ACT & ASSERT ============
+        address[] memory accounts = _accounts(alice, bob, charlie);
+
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", alice));
+        vault.addBatchToWhitelist(accounts);
+
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", alice));
+        vault.removeBatchFromWhitelist(accounts);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -317,6 +401,66 @@ contract WhitelistTest is Test {
         assertEq(vault.balanceOf(alice), shares / 2, "Alice should retain half");
     }
 
+    /**
+     * @notice Tests that the default removal hook allows every removal (the vault overrides it for the fee recipient).
+     */
+    function test_BeforeRemoval_DefaultAllowsRemoval() public {
+        // ============ ARRANGE ============
+        WhitelistHarness harness = new WhitelistHarness(owner);
+        vm.startPrank(owner);
+        harness.addToWhitelist(alice);
+
+        // ============ ACT ============
+        harness.removeFromWhitelist(alice);
+        vm.stopPrank();
+
+        // ============ ASSERT ============
+        assertFalse(harness.isWhitelisted(alice), "Alice should be removed");
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                       OWNERSHIP TESTS
+    //////////////////////////////////////////////////////////////*/
+
+    /**
+     * @notice Tests that the owner cannot renounce ownership.
+     */
+    function test_RenounceOwnership_RevertForOwner() public {
+        // ============ ACT & ASSERT ============
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSignature("RenounceOwnershipDisabled()"));
+        vault.renounceOwnership();
+
+        assertEq(vault.owner(), owner, "Owner should not change");
+    }
+
+    /**
+     * @notice Tests that renounceOwnership also reverts for any other caller.
+     */
+    function test_RenounceOwnership_RevertForNonOwner() public {
+        // ============ ACT & ASSERT ============
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSignature("RenounceOwnershipDisabled()"));
+        vault.renounceOwnership();
+
+        assertEq(vault.owner(), owner, "Owner should not change");
+    }
+
+    /**
+     * @notice Tests that ownership can still be transferred, so the whitelist keeps an owner.
+     */
+    function test_TransferOwnership_StillWorks() public {
+        // ============ ACT ============
+        vm.prank(owner);
+        vault.transferOwnership(bob);
+
+        // ============ ASSERT ============
+        assertEq(vault.owner(), bob, "Ownership should transfer");
+        vm.prank(bob);
+        vault.addToWhitelist(charlie);
+        assertTrue(vault.isWhitelisted(charlie), "New owner should manage the whitelist");
+    }
+
     /*//////////////////////////////////////////////////////////////
                        WITHDRAWAL TESTS
     //////////////////////////////////////////////////////////////*/
@@ -345,6 +489,64 @@ contract WhitelistTest is Test {
         vault.withdraw(DEPOSIT_AMOUNT / 2, alice, alice);
 
         assertGt(asset.balanceOf(alice), balanceBefore, "Alice should receive assets despite being removed");
+    }
+
+    /**
+     * @notice Tests that a user removed from the whitelist can withdraw during emergency mode.
+     */
+    function test_Withdraw_RemovedUserDuringEmergency() public {
+        // ============ ARRANGE: ALICE DEPOSITS, IS REMOVED, EMERGENCY STARTS ============
+        vm.prank(owner);
+        vault.addToWhitelist(alice);
+
+        vm.startPrank(alice);
+        asset.approve(address(vault), DEPOSIT_AMOUNT);
+        vault.deposit(DEPOSIT_AMOUNT, alice);
+        vm.stopPrank();
+
+        vm.prank(owner);
+        vault.removeFromWhitelist(alice);
+        vm.prank(admin);
+        vault.setEmergencyMode(true);
+
+        // ============ ACT ============
+        uint256 balanceBefore = asset.balanceOf(alice);
+        uint256 shares = vault.balanceOf(alice);
+        vm.prank(alice);
+        vault.redeem(shares, alice, alice);
+
+        // ============ ASSERT ============
+        assertEq(asset.balanceOf(alice) - balanceBefore, DEPOSIT_AMOUNT, "Alice should recover the deposit");
+        assertEq(vault.balanceOf(alice), 0, "Alice should have no shares left");
+    }
+
+    /**
+     * @notice Tests that share transfers keep the whitelist rule during emergency mode.
+     */
+    function test_Transfer_DuringEmergency() public {
+        // ============ ARRANGE ============
+        vm.startPrank(owner);
+        vault.addToWhitelist(alice);
+        vault.addToWhitelist(bob);
+        vm.stopPrank();
+
+        vm.startPrank(alice);
+        asset.approve(address(vault), DEPOSIT_AMOUNT);
+        uint256 shares = vault.deposit(DEPOSIT_AMOUNT, alice);
+        vm.stopPrank();
+
+        vm.prank(admin);
+        vault.setEmergencyMode(true);
+
+        // ============ ACT & ASSERT: TO WHITELISTED SUCCEEDS ============
+        vm.prank(alice);
+        vault.transfer(bob, shares / 2);
+        assertEq(vault.balanceOf(bob), shares / 2, "Bob should receive shares during emergency");
+
+        // ============ ACT & ASSERT: TO NON-WHITELISTED REVERTS ============
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSignature("NotWhitelisted(address)", charlie));
+        vault.transfer(charlie, shares / 2);
     }
 
     /**
@@ -413,6 +615,17 @@ contract WhitelistTest is Test {
         // ============ ASSERT ============
         assertGt(asset.balanceOf(alice), balanceBefore, "Alice should receive assets");
         assertEq(vault.balanceOf(alice), shares / 2, "Alice should have half shares left");
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                            HELPERS
+    //////////////////////////////////////////////////////////////*/
+
+    function _accounts(address a, address b, address c) internal pure returns (address[] memory accounts) {
+        accounts = new address[](3);
+        accounts[0] = a;
+        accounts[1] = b;
+        accounts[2] = c;
     }
 
     /*//////////////////////////////////////////////////////////////

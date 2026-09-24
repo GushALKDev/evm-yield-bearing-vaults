@@ -8,6 +8,8 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IPool} from "../../src/interfaces/aave/IPool.sol";
 import {Constants} from "../../src/utils/Constants.sol";
 import {YieldBearingVault} from "../../src/vaults/YieldBearingVault.sol";
+import {ForkConfig} from "../utils/ForkConfig.sol";
+import {VaultDeployer} from "../utils/VaultDeployer.sol";
 
 /**
  * @title WETHLoopStrategyFuzzTest
@@ -53,8 +55,7 @@ contract WETHLoopStrategyFuzzTest is Test {
         vaultOwner = makeAddr("vaultOwner");
         vaultAdmin = makeAddr("vaultAdmin");
 
-        string memory rpc = vm.envString("ETHEREUM_MAINNET_RPC");
-        vm.createSelectFork(rpc);
+        ForkConfig.selectMainnetFork();
 
         weth = IERC20(WETH_MAINNET);
         address poolManagerAddress = UNISWAP_V4_POOL_MANAGER;
@@ -70,9 +71,9 @@ contract WETHLoopStrategyFuzzTest is Test {
         vm.startPrank(vaultOwner);
         deal(address(weth), vaultOwner, INITIAL_DEPOSIT);
 
-        address predictedVault = vm.computeCreateAddress(vaultOwner, vm.getNonce(vaultOwner));
-        weth.approve(predictedVault, INITIAL_DEPOSIT);
-        YieldBearingVault bVault = new YieldBearingVault(weth, vaultOwner, vaultAdmin, INITIAL_DEPOSIT);
+        VaultDeployer vaultDeployer = new VaultDeployer();
+        weth.approve(address(vaultDeployer), INITIAL_DEPOSIT);
+        YieldBearingVault bVault = vaultDeployer.deploy(weth, vaultOwner, vaultAdmin, INITIAL_DEPOSIT);
         vm.stopPrank();
 
         vault = address(bVault);
@@ -112,8 +113,7 @@ contract WETHLoopStrategyFuzzTest is Test {
         strategy.deposit(depositAmount, vault);
         vm.stopPrank();
 
-        (uint256 totalCollateralBase, uint256 totalDebtBase,,,, uint256 healthFactor) =
-            IPool(resolvedPool).getUserAccountData(address(strategy));
+        (uint256 totalCollateralBase, uint256 totalDebtBase,,,, uint256 healthFactor) = IPool(resolvedPool).getUserAccountData(address(strategy));
 
         assertGe(healthFactor, MIN_HEALTH_FACTOR, "Health factor must be above minimum");
         assertGt(totalCollateralBase, 0, "Should have collateral");
@@ -174,15 +174,12 @@ contract WETHLoopStrategyFuzzTest is Test {
         customStrategy.deposit(depositAmount, vault);
         vm.stopPrank();
 
-        (uint256 totalCollateralBase, uint256 totalDebtBase,,,, uint256 healthFactor) =
-            IPool(resolvedPool).getUserAccountData(address(customStrategy));
+        (uint256 totalCollateralBase, uint256 totalDebtBase,,,, uint256 healthFactor) = IPool(resolvedPool).getUserAccountData(address(customStrategy));
 
         assertGe(healthFactor, MIN_HEALTH_FACTOR, "Health factor must be above minimum");
 
         uint256 actualLeverage = totalCollateralBase * 100 / (totalCollateralBase - totalDebtBase);
-        assertApproxEqRel(
-            actualLeverage, uint256(leverageTarget) * 100, 0.15e18, "Leverage should match target within 15%"
-        );
+        assertApproxEqRel(actualLeverage, uint256(leverageTarget) * 100, 0.15e18, "Leverage should match target within 15%");
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -203,8 +200,7 @@ contract WETHLoopStrategyFuzzTest is Test {
         strategy.deposit(depositAmount, vault);
         vm.stopPrank();
 
-        (uint256 initialCollateral, uint256 initialDebt,,,,) =
-            IPool(resolvedPool).getUserAccountData(address(strategy));
+        (uint256 initialCollateral, uint256 initialDebt,,,,) = IPool(resolvedPool).getUserAccountData(address(strategy));
 
         uint256 withdrawAmount = (depositAmount * withdrawRatio) / 100;
 
@@ -214,8 +210,7 @@ contract WETHLoopStrategyFuzzTest is Test {
 
         uint256 receivedAmount = weth.balanceOf(vault) - vaultBalanceBefore;
 
-        (uint256 finalCollateral, uint256 finalDebt,,,, uint256 finalHealthFactor) =
-            IPool(resolvedPool).getUserAccountData(address(strategy));
+        (uint256 finalCollateral, uint256 finalDebt,,,, uint256 finalHealthFactor) = IPool(resolvedPool).getUserAccountData(address(strategy));
 
         assertApproxEqAbs(receivedAmount, withdrawAmount, 100, "Should receive withdrawal amount");
         assertGe(finalHealthFactor, MIN_HEALTH_FACTOR, "Health factor should remain healthy");
@@ -260,9 +255,7 @@ contract WETHLoopStrategyFuzzTest is Test {
      * @param user2Deposit User 2 deposit (0.5-2 ETH).
      * @param user1WithdrawRatio User 1 withdraw percentage (50-100%).
      */
-    function testFuzz_Divest_MultipleUsers(uint256 user1Deposit, uint256 user2Deposit, uint8 user1WithdrawRatio)
-        public
-    {
+    function testFuzz_Divest_MultipleUsers(uint256 user1Deposit, uint256 user2Deposit, uint8 user1WithdrawRatio) public {
         user1Deposit = bound(user1Deposit, 0.5 ether, 2 ether);
         user2Deposit = bound(user2Deposit, 0.5 ether, 2 ether);
         user1WithdrawRatio = uint8(bound(user1WithdrawRatio, 50, 100));
@@ -371,7 +364,8 @@ contract WETHLoopStrategyFuzzTest is Test {
         assertTrue(YieldBearingVault(vault).emergencyMode(), "Emergency mode should be active");
 
         uint256 finalDebt = IERC20(VARIABLE_DEBT_WETH).balanceOf(address(strategy));
-        assertLt(finalDebt, 100, "Debt should be fully repaid");
+        assertEq(finalDebt, 0, "Debt should be fully repaid");
+        assertApproxEqAbs(strategy.totalAssets(), depositAmount, 10, "Emergency divest should preserve equity");
     }
 
     /**
@@ -401,8 +395,11 @@ contract WETHLoopStrategyFuzzTest is Test {
 
         assertTrue(strategy.emergencyMode(), "Emergency mode should be active");
 
-        vm.prank(vaultAdmin);
+        vm.startPrank(vaultAdmin);
         YieldBearingVault(vault).setEmergencyMode(false);
+        strategy.setHealthFactors(MIN_HEALTH_FACTOR, TARGET_HEALTH_FACTOR);
+        YieldBearingVault(vault).reinvest();
+        vm.stopPrank();
 
         assertFalse(strategy.emergencyMode(), "Emergency mode should be deactivated");
 
@@ -494,8 +491,7 @@ contract WETHLoopStrategyFuzzTest is Test {
         strategy.deposit(depositAmount, vault);
         vm.stopPrank();
 
-        (uint256 totalCollateralBase, uint256 totalDebtBase,,,,) =
-            IPool(resolvedPool).getUserAccountData(address(strategy));
+        (uint256 totalCollateralBase, uint256 totalDebtBase,,,,) = IPool(resolvedPool).getUserAccountData(address(strategy));
 
         uint256 leverageRatio = totalCollateralBase * 100 / (totalCollateralBase - totalDebtBase);
 

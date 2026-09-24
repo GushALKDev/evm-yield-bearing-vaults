@@ -5,6 +5,8 @@ import {BaseStrategy} from "../base/BaseStrategy.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {AaveAdapter} from "../adapters/AaveAdapter.sol";
+import {IPool} from "../interfaces/aave/IPool.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 /**
  * @title AaveSimpleLendingStrategy
@@ -23,6 +25,16 @@ contract AaveSimpleLendingStrategy is BaseStrategy {
     address public immutable AAVE_POOL;
     address public immutable A_TOKEN;
 
+    uint256 private constant RAY = 1e27;
+
+    /**
+     * @dev Gas that exitPosition() receives before emergency mode can be activated. Measured at the pinned fork block
+     *      with isolated transactions: 156,070 through the admin activation
+     *      (EmergencyActivationForkTest.test_AdminEmergency_AaveSimple_ExitsAaveAndAllowsRedeem, read from
+     *      `forge test --match-test <test> --isolate -vvvv`). 250,000 adds about 60% for Aave upgrades.
+     */
+    uint256 public constant EXIT_GAS = 250_000;
+
     /*//////////////////////////////////////////////////////////////
                                  ERRORS
     //////////////////////////////////////////////////////////////*/
@@ -34,9 +46,7 @@ contract AaveSimpleLendingStrategy is BaseStrategy {
                               CONSTRUCTOR
     //////////////////////////////////////////////////////////////*/
 
-    constructor(IERC20 _asset, address _vault, address _aavePool, address _aToken)
-        BaseStrategy(_asset, _vault, "Aave Strategy", "sAAVE")
-    {
+    constructor(IERC20 _asset, address _vault, address _aavePool, address _aToken) BaseStrategy(_asset, _vault, "Aave Strategy", "sAAVE") {
         AAVE_POOL = _aavePool;
         A_TOKEN = _aToken;
     }
@@ -45,13 +55,58 @@ contract AaveSimpleLendingStrategy is BaseStrategy {
                           STRATEGY LOGIC
     //////////////////////////////////////////////////////////////*/
 
+    /**
+     * @dev Amounts that Aave would mint as 0 scaled aTokens (amount / liquidity index, rounded down) revert the
+     *      supply, so they stay idle: counted by totalAssets(), paid out first on withdrawals, invested by reinvest().
+     */
     function _invest(uint256 assets) internal override {
-        AaveAdapter.supply(AAVE_POOL, address(asset()), assets);
+        // Checks
+        address assetAddr = asset();
+        if (assets * RAY / IPool(AAVE_POOL).getReserveNormalizedIncome(assetAddr) == 0) return;
+
+        // Interactions
+        AaveAdapter.supply(AAVE_POOL, assetAddr, assets);
     }
 
+    /**
+     * @dev Pays from idle assets first and withdraws only the shortfall from Aave.
+     */
     function _divest(uint256 assets) internal override {
-        uint256 withdrawn = AaveAdapter.withdraw(AAVE_POOL, asset(), assets);
-        if (withdrawn < assets) revert InsufficientAaveWithdrawal(withdrawn, assets);
+        address assetAddr = asset();
+        uint256 idle = IERC20(assetAddr).balanceOf(address(this));
+        if (idle >= assets) return;
+
+        // Gas: unchecked safe (idle < assets checked above)
+        uint256 shortfall;
+        unchecked {
+            shortfall = assets - idle;
+        }
+        uint256 withdrawn = AaveAdapter.withdraw(AAVE_POOL, assetAddr, shortfall);
+        if (withdrawn < shortfall) revert InsufficientAaveWithdrawal(withdrawn, shortfall);
+    }
+
+    /**
+     * @dev Withdraws the whole Aave supply to idle assets.
+     */
+    function _exitPosition() internal override {
+        if (IERC20(A_TOKEN).balanceOf(address(this)) == 0) return;
+        //slither-disable-next-line unused-return
+        // Withdrawn amount is the full aToken balance
+        AaveAdapter.withdraw(AAVE_POOL, asset(), type(uint256).max);
+    }
+
+    /**
+     * @dev Idle assets plus the supply Aave can pay out now (0 while the reserve is paused).
+     */
+    function _withdrawableAssets() internal view override returns (uint256) {
+        address assetAddr = asset();
+        uint256 idle = IERC20(assetAddr).balanceOf(address(this));
+        uint256 supplied = IERC20(A_TOKEN).balanceOf(address(this));
+        return idle + Math.min(supplied, AaveAdapter.withdrawableLiquidity(AAVE_POOL, assetAddr));
+    }
+
+    function _exitGas() internal pure override returns (uint256) {
+        return EXIT_GAS;
     }
 
     /**
@@ -69,9 +124,9 @@ contract AaveSimpleLendingStrategy is BaseStrategy {
     }
 
     /**
-     * @dev Measured by the aToken balance which includes accrued interest.
+     * @dev aToken balance (includes accrued interest) plus idle assets held by the strategy.
      */
     function totalAssets() public view override returns (uint256) {
-        return IERC20(A_TOKEN).balanceOf(address(this));
+        return IERC20(A_TOKEN).balanceOf(address(this)) + IERC20(asset()).balanceOf(address(this));
     }
 }

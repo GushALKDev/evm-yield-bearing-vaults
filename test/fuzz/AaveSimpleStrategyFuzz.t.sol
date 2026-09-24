@@ -6,6 +6,8 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {YieldBearingVault} from "../../src/vaults/YieldBearingVault.sol";
 import {AaveSimpleLendingStrategy} from "../../src/strategies/AaveSimpleLendingStrategy.sol";
 import {Constants} from "../../src/utils/Constants.sol";
+import {ForkConfig} from "../utils/ForkConfig.sol";
+import {VaultDeployer} from "../utils/VaultDeployer.sol";
 
 /**
  * @title AaveSimpleStrategyFuzzTest
@@ -44,7 +46,7 @@ contract AaveSimpleStrategyFuzzTest is Test {
         alice = makeAddr("alice");
         owner = makeAddr("owner");
 
-        vm.createSelectFork(vm.envString("ETHEREUM_MAINNET_RPC"));
+        ForkConfig.selectMainnetFork();
 
         usdc = IERC20(USDC);
         aUsdc = IERC20(A_USDC);
@@ -53,9 +55,9 @@ contract AaveSimpleStrategyFuzzTest is Test {
 
         vm.startPrank(owner);
 
-        address vaultAddr = vm.computeCreateAddress(owner, vm.getNonce(owner));
-        usdc.approve(vaultAddr, REQUIRED_DEPOSIT);
-        vault = new YieldBearingVault(usdc, owner, owner, REQUIRED_DEPOSIT);
+        VaultDeployer vaultDeployer = new VaultDeployer();
+        usdc.approve(address(vaultDeployer), REQUIRED_DEPOSIT);
+        vault = vaultDeployer.deploy(usdc, owner, owner, REQUIRED_DEPOSIT);
 
         strategy = new AaveSimpleLendingStrategy(usdc, address(vault), AAVE_POOL, A_USDC);
 
@@ -89,11 +91,7 @@ contract AaveSimpleStrategyFuzzTest is Test {
         assertEq(usdc.balanceOf(address(vault)), REQUIRED_DEPOSIT, "Vault should hold buffer");
         assertEq(usdc.balanceOf(address(strategy)), 0, "Strategy should hold 0 underlying");
 
-        assertEq(
-            vault.totalSupply(),
-            vault.balanceOf(alice) + vault.balanceOf(DEAD_ADDRESS),
-            "Vault supply invariant"
-        );
+        assertEq(vault.totalSupply(), vault.balanceOf(alice) + vault.balanceOf(DEAD_ADDRESS), "Vault supply invariant");
         assertEq(strategy.totalSupply(), strategy.balanceOf(address(vault)), "Strategy supply invariant");
     }
 
@@ -150,9 +148,7 @@ contract AaveSimpleStrategyFuzzTest is Test {
             totalDeposits += baseDeposit;
         }
 
-        assertApproxEqAbs(
-            vault.totalAssets(), totalDeposits + REQUIRED_DEPOSIT, uint256(userCount) * 2, "Total deposits match"
-        );
+        assertApproxEqAbs(vault.totalAssets(), totalDeposits + REQUIRED_DEPOSIT, uint256(userCount) * 2, "Total deposits match");
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -359,11 +355,7 @@ contract AaveSimpleStrategyFuzzTest is Test {
         vault.deposit(depositAmount, alice);
         vm.stopPrank();
 
-        assertEq(
-            vault.totalSupply(),
-            vault.balanceOf(alice) + vault.balanceOf(DEAD_ADDRESS),
-            "Vault total supply invariant"
-        );
+        assertEq(vault.totalSupply(), vault.balanceOf(alice) + vault.balanceOf(DEAD_ADDRESS), "Vault total supply invariant");
         assertEq(strategy.totalSupply(), strategy.balanceOf(address(vault)), "Strategy total supply invariant");
     }
 
@@ -384,9 +376,7 @@ contract AaveSimpleStrategyFuzzTest is Test {
         uint256 vaultAssets = vault.totalAssets();
         uint256 strategyAssets = strategy.totalAssets();
 
-        assertApproxEqAbs(
-            vaultAssets, strategyAssets + REQUIRED_DEPOSIT, 2, "Vault assets should equal strategy + buffer"
-        );
+        assertApproxEqAbs(vaultAssets, strategyAssets + REQUIRED_DEPOSIT, 2, "Vault assets should equal strategy + buffer");
     }
 
     /**
