@@ -321,6 +321,24 @@ contract BaseVaultTest is Test {
         vault.setEmergencyMode(true);
     }
 
+    /**
+     * @notice Tests that the strategy cannot be replaced during emergency mode.
+     */
+    function test_SetStrategy_RevertIfEmergency() public {
+        // ============ ARRANGE ============
+        MockStrategy newStrategy = new MockStrategy(asset, address(vault));
+        vm.prank(admin);
+        vault.setEmergencyMode(true);
+
+        // ============ ACT & ASSERT ============
+        vm.prank(admin);
+        vm.expectRevert(abi.encodeWithSignature("VaultInEmergency()"));
+        vault.setStrategy(newStrategy);
+
+        assertEq(address(vault.strategy()), address(strategy), "Strategy should not change");
+        assertEq(vault.emergencyMode(), strategy.emergencyMode(), "Vault and strategy flags stay in sync");
+    }
+
     /*//////////////////////////////////////////////////////////////
                          ERC-4626 LIMIT TESTS
     //////////////////////////////////////////////////////////////*/

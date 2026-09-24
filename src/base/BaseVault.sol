@@ -140,9 +140,10 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
     }
 
     /**
-     * @dev Warning: Ensure funds from old strategy are migrated first.
+     * @dev Warning: Ensure funds from old strategy are migrated first. Blocked during emergency mode, since the new
+     *      strategy would start with its flag off while the vault's is on.
      */
-    function setStrategy(BaseStrategy _strategy) external onlyAdmin {
+    function setStrategy(BaseStrategy _strategy) external onlyAdmin whenNotEmergency {
         if (address(_strategy) == address(0)) revert InvalidStrategy();
         strategy = _strategy;
         SafeERC20.forceApprove(IERC20(asset()), address(_strategy), type(uint256).max);
