@@ -176,11 +176,22 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
     }
 
     /**
-     * @notice Reinvests the strategy's idle assets, the second step of leaving emergency mode.
+     * @notice Reinvests idle assets, the second step of leaving emergency mode.
+     * @dev Deposits the vault's own idle balance (initial deposit, donations, rounding) into the strategy, then has
+     *      the strategy invest its whole idle balance. totalAssets() does not change.
      */
     function reinvest() external onlyAdmin whenNotEmergency {
+        // Checks
         BaseStrategy cachedStrategy = strategy;
         if (address(cachedStrategy) == address(0)) revert InvalidStrategy();
+
+        // Interactions
+        uint256 idle = IERC20(asset()).balanceOf(address(this));
+        if (idle > 0) {
+            uint256 expectedShares = cachedStrategy.previewDeposit(idle);
+            uint256 actualShares = cachedStrategy.deposit(idle, address(this));
+            if (actualShares < expectedShares) revert InsufficientStrategyShares(actualShares, expectedShares);
+        }
         cachedStrategy.reinvest();
     }
 

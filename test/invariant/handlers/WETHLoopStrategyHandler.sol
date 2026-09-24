@@ -199,10 +199,15 @@ contract WETHLoopStrategyHandler is Test {
     function recover() external {
         if (!vault.emergencyMode()) return;
 
+        // reinvest() deposits the vault's idle balance into the strategy
+        uint256 vaultIdle = weth.balanceOf(address(vault));
+
         vm.startPrank(admin);
         vault.setEmergencyMode(false);
         vault.reinvest();
         vm.stopPrank();
+
+        ghost_expectedEquity += vaultIdle;
 
         ghost_recoveries++;
         ghost_equityOps++;

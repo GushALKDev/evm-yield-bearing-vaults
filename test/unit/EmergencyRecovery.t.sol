@@ -46,7 +46,8 @@ abstract contract EmergencyRecoveryTestBase is StrategyTestBase {
         vault.setEmergencyMode(true);
         vault.setEmergencyMode(false);
         vm.stopPrank();
-        uint256 equity = strategy.totalAssets();
+        // reinvest() also moves the vault's idle balance (the initial deposit) into the strategy
+        uint256 equity = strategy.totalAssets() + weth.balanceOf(address(vault));
 
         // ============ ACT ============
         vm.prank(admin);
@@ -182,7 +183,8 @@ abstract contract EmergencyRecoveryTestBase is StrategyTestBase {
         vault.reinvest();
 
         // ============ ASSERT ============
-        assertEq(weth.balanceOf(address(strategy)), 1000, "Dust should stay idle");
+        // 1,000 wei donated plus the vault's 1,000 wei initial deposit
+        assertEq(weth.balanceOf(address(strategy)), 2000, "Dust should stay idle");
         assertEq(IERC20(aToken).balanceOf(address(strategy)), 0, "No collateral should be supplied");
         assertEq(IERC20(debtToken).balanceOf(address(strategy)), 0, "No debt should be taken");
     }
@@ -211,7 +213,7 @@ abstract contract EmergencyRecoveryTestBase is StrategyTestBase {
         assertGt(IERC20(debtToken).balanceOf(address(strategy)), 0, "Position should be opened");
     }
 
-    /// @notice The Aave simple strategy keeps idle an amount Aave would mint as 0 scaled aTokens instead of reverting.
+    /// @notice The Aave simple strategy keeps idle a deposit Aave would mint as 0 scaled aTokens instead of reverting.
     function test_AaveSimple_DustStaysIdle() public {
         // ============ ARRANGE ============
         (YieldBearingVault vault, AaveSimpleLendingStrategy strategy) = _deployAaveSimple();
@@ -220,12 +222,31 @@ abstract contract EmergencyRecoveryTestBase is StrategyTestBase {
 
         // ============ ACT ============
         _deposit(vault, alice, 1);
-        vm.prank(admin);
-        vault.reinvest();
 
         // ============ ASSERT ============
         assertEq(IERC20(aToken).balanceOf(address(strategy)), 0, "Nothing should be supplied");
         assertEq(weth.balanceOf(address(strategy)), 1, "Dust should stay idle");
+    }
+
+    /// @notice reinvest() moves the vault's own idle balance into the strategy and invests it without changing totalAssets().
+    function test_Reinvest_MovesVaultIdleIntoStrategy() public {
+        // ============ ARRANGE ============
+        (YieldBearingVault vault, WETHLoopStrategy strategy) = _deployWethLoop();
+        _deposit(vault, alice, 1 ether);
+        _fund(address(vault), 1 ether);
+        uint256 totalAssetsBefore = vault.totalAssets();
+        uint256 equity = strategy.totalAssets() + weth.balanceOf(address(vault));
+
+        // ============ ACT ============
+        vm.prank(admin);
+        vault.reinvest();
+
+        // ============ ASSERT ============
+        assertEq(weth.balanceOf(address(vault)), 0, "Vault idle should move to the strategy");
+        assertEq(weth.balanceOf(address(strategy)), 0, "Strategy idle should be invested");
+        // Two investments (vault idle, then strategy idle): Aave rounding on equity is multiplied by L - 1 in the debt
+        assertApproxEqAbs(IERC20(debtToken).balanceOf(address(strategy)), equity * (TARGET_LEVERAGE - 1), 100, "Whole equity at target leverage");
+        assertApproxEqAbs(vault.totalAssets(), totalAssetsBefore, 10, "totalAssets() should not change");
     }
 
     function _setPoolManagerBalance(uint256 amount) internal {
