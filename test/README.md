@@ -2,26 +2,26 @@
 
 ## Overview
 
-The suite is organized into unit tests (mocked dependencies), integration tests (mainnet fork), stateless fuzz tests, stateful invariant tests with the handler pattern and a gas benchmark. Results below were obtained on commit `48144c3` with Forge 1.7.1; fork suites run against Ethereum mainnet at block 26043110. See the [main README](../README.md) for the project status, trust assumptions and review notes.
+The suite is organized into unit tests (mocked dependencies), integration tests (mainnet fork), stateless fuzz tests, stateful invariant tests with the handler pattern and a gas benchmark. Results below were obtained on commit `736405b` with Forge 1.7.1; fork suites run against Ethereum mainnet at block 26043110. See the [main README](../README.md) for the project status, trust assumptions and review notes.
 
 ## Test Statistics
 
 | Category | Location | Tests | Needs `ETHEREUM_MAINNET_RPC` |
 |----------|----------|-------|------------------------------|
-| Unit | `unit/` | 114 | No |
-| Integration | `integration/` | 55 | Yes |
+| Unit | `unit/` | 149 | No |
+| Integration | `integration/` | 62 | Yes |
 | Stateless fuzzing | `fuzz/` | 43 (15 mock, 28 fork) | For `WETHLoopStrategyFuzz` and `AaveSimpleStrategyFuzz` |
-| Stateful fuzzing (invariants) | `invariant/` | 25 | No in mock mode (default) |
+| Stateful fuzzing (invariants) | `invariant/` | 26 | No in mock mode (default) |
 | Gas benchmark | `gas/` | 10 (5 mock, 5 fork) | For `GasBenchmarkForkTest` |
-| **Total** | | **247, all passing** | |
+| **Total** | | **290, all passing** | |
 
 Iterations:
 
 - Stateless: 43 tests x 256 runs = 11,008 runs (Foundry default runs; `foundry.toml` has no `[fuzz]` section).
-- Stateful: 25 invariant functions x 256 runs x 50 depth = 320,000 handler calls (`[invariant]` in `foundry.toml`). Forge reports `runs: 256, calls: 12800` for each invariant function.
-- Total: 331,008 fuzz runs and handler calls.
+- Stateful: 26 invariant functions x 256 runs x 50 depth = 332,800 handler calls (`[invariant]` in `foundry.toml`). Forge reports `runs: 256, calls: 12800` for each invariant function.
+- Total: 343,808 fuzz runs and handler calls.
 
-Mock mode (no RPC) runs 159 tests:
+Mock mode (no RPC) runs 195 tests:
 
 ```bash
 forge test --no-match-path "test/{integration/*,fuzz/*StrategyFuzz.t.sol,gas/GasBenchmarkFork.t.sol}"
@@ -41,62 +41,64 @@ Without `ETHEREUM_MAINNET_RPC`, plain `forge test` fails in `setUp()` for the fo
 
 ## Code Coverage
 
-`forge coverage --no-match-coverage "(test|script|mock)"`, all 247 tests:
+`forge coverage --no-match-coverage "(test|script|mock)"`, all 290 tests:
 
 | File | Lines | Statements | Branches | Functions |
 |------|-------|------------|----------|-----------|
-| `access/Whitelist.sol` | 25.81% (8/31) | 24.14% (7/29) | 28.57% (2/7) | 33.33% (2/6) |
+| `access/Whitelist.sol` | 100.00% (33/33) | 100.00% (30/30) | 100.00% (7/7) | 100.00% (7/7) |
 | `adapters/AaveAdapter.sol` | 100.00% (15/15) | 100.00% (17/17) | 100.00% (4/4) | 100.00% (4/4) |
 | `adapters/UniswapV4Adapter.sol` | 100.00% (24/24) | 100.00% (24/24) | 100.00% (2/2) | 100.00% (5/5) |
-| `base/BaseStrategy.sol` | 97.92% (47/48) | 88.89% (32/36) | 80.00% (8/10) | 100.00% (18/18) |
-| `base/BaseVault.sol` | 100.00% (112/112) | 95.90% (117/122) | 80.77% (21/26) | 100.00% (23/23) |
+| `base/BaseStrategy.sol` | 97.87% (46/47) | 91.43% (32/35) | 87.50% (7/8) | 100.00% (19/19) |
+| `base/BaseVault.sol` | 100.00% (121/121) | 97.01% (130/134) | 85.71% (24/28) | 100.00% (26/26) |
 | `strategies/AaveSimpleLendingStrategy.sol` | 100.00% (22/22) | 96.00% (24/25) | 66.67% (2/3) | 100.00% (7/7) |
-| `strategies/WETHLoopStrategy.sol` | 94.12% (96/102) | 83.21% (109/131) | 41.38% (12/29) | 100.00% (13/13) |
-| **Total** | **91.53% (324/354)** | **85.94% (330/384)** | **62.96% (51/81)** | **94.74% (72/76)** |
+| `strategies/WETHLoopStrategy.sol` | 94.34% (100/106) | 85.71% (120/140) | 48.28% (14/29) | 100.00% (14/14) |
+| **Total** | **98.10% (361/368)** | **93.09% (377/405)** | **74.07% (60/81)** | **100.00% (82/82)** |
 
 Main gaps:
 
-- `Whitelist.sol`: the batch functions and the unused `onlyWhitelisted` modifier are not covered.
-- `WETHLoopStrategy.sol`: 17 of 29 branches, mostly error paths, are not covered.
+- `WETHLoopStrategy.sol`: 15 of 29 branches, mostly error paths, are not covered.
 
 ## Test Organization
 
 ```
 test/
-├── unit/                                   # Unit tests (114 tests)
-│   ├── BaseVault.t.sol                    # 22 tests - Vault admin functions
-│   ├── Whitelist.t.sol                    # 17 tests - Whitelist enforcement
-│   ├── AccessControl.t.sol                # 22 tests - Access control modifiers
+├── unit/                                   # Unit tests (149 tests)
+│   ├── BaseVault.t.sol                    # 28 tests - Vault admin functions and ERC-4626 limits
+│   ├── Whitelist.t.sol                    # 26 tests - Whitelist enforcement and ownership
+│   ├── AccessControl.t.sol                # 27 tests - Access control modifiers
 │   ├── EdgeCases.t.sol                    # 18 tests - Edge cases and boundaries
 │   ├── YieldFlow.t.sol                    #  4 tests - Yield mechanics
 │   ├── Adapters.t.sol                     #  9 tests - AaveAdapter and UniswapV4Adapter through harnesses
 │   ├── Reentrancy.t.sol                   #  6 tests - Reentrant calls through a callback token
 │   ├── PerformanceFeeTiming.t.sol         #  2 tests - Review finding 5
 │   ├── EmergencyAccounting.t.sol          #  6 tests - Review finding 1 (mock)
-│   ├── EmergencyActivation.t.sol          #  5 tests - Review finding 2 (mock)
+│   ├── EmergencyActivation.t.sol          #  6 tests - Review finding 2 and checkHealth retries (mock)
+│   ├── EmergencyRecovery.t.sol            #  6 tests - Two-step exit from emergency mode (mock)
+│   ├── HealthFactorBounds.t.sol           #  8 tests - 1e18 < minHealthFactor < targetHealthFactor
 │   └── FullExit.t.sol                     #  3 tests - Review finding 3 (mock)
-├── integration/                            # Integration tests, mainnet fork (55 tests)
+├── integration/                            # Integration tests, mainnet fork (62 tests)
 │   ├── AaveSimpleStrategyFork.t.sol       #  3 tests - Aave simple strategy
 │   ├── WETHLoopStrategy.t.sol             #  9 tests - WETH leveraged strategy and emergency flow
 │   ├── StrategyHealthCheck.t.sol          #  9 tests - Strategy health and harvest
 │   ├── WETHLoopStrategyErrorPaths.t.sol   # 18 tests - WETH strategy error paths and views
 │   ├── EmergencyAccountingFork.t.sol      #  5 tests - Review finding 1 (fork)
-│   ├── EmergencyActivationFork.t.sol      #  5 tests - Review finding 2 (fork)
+│   ├── EmergencyActivationFork.t.sol      #  6 tests - Review finding 2 and checkHealth retries (fork)
+│   ├── EmergencyRecoveryFork.t.sol        #  6 tests - Two-step exit from emergency mode (fork)
 │   ├── FullExitFork.t.sol                 #  3 tests - Review finding 3 (fork)
 │   └── LeverageBoundsFork.t.sol           #  3 tests - E-Mode parameters and leverage limits
 ├── fuzz/                                   # Stateless fuzzing (43 tests)
 │   ├── BaseVaultFuzz.t.sol                # 15 tests - Vault fuzzing (mock)
 │   ├── WETHLoopStrategyFuzz.t.sol         # 13 tests - WETH strategy fuzzing (fork)
 │   └── AaveSimpleStrategyFuzz.t.sol       # 15 tests - Aave strategy fuzzing (fork)
-├── invariant/                              # Stateful fuzzing (25 invariant functions)
+├── invariant/                              # Stateful fuzzing (26 invariant functions)
 │   ├── InvariantBase.sol                  # Shared actors, constants, fork/mock detection
 │   ├── BaseVaultInvariant.t.sol           #  8 invariants - Vault
 │   ├── WETHLoopStrategyInvariant.t.sol    #  9 invariants - Strategy
-│   ├── IntegratedInvariant.t.sol          #  8 invariants - System-wide
+│   ├── IntegratedInvariant.t.sol          #  9 invariants - System-wide
 │   └── handlers/
 │       ├── BaseVaultHandler.sol           # Vault operations, HWM model, simulated yield
 │       ├── WETHLoopStrategyHandler.sol    # Strategy operations, equity model, emergency actions
-│       └── AdminHandler.sol               # Admin operations
+│       └── AdminHandler.sol               # Admin operations, including reinvest
 ├── gas/                                    # Gas benchmark (10 tests)
 │   ├── GasBenchmark.t.sol                 #  5 tests - Shared scenarios, mock mode
 │   └── GasBenchmarkFork.t.sol             #  5 tests - Same scenarios, fork mode
@@ -113,7 +115,7 @@ test/
 
 ## Unit Tests
 
-### BaseVault.t.sol (22 tests)
+### BaseVault.t.sol (28 tests)
 
 **Admin Functions**:
 - `test_SetAdmin_Success` - Admin can be changed
@@ -121,6 +123,7 @@ test/
 - `test_SetAdmin_RevertIfZeroAddress` - Cannot set zero address as admin
 - `test_SetStrategy_Success` - Strategy can be changed
 - `test_SetStrategy_RevertIfNotAdmin` - Only admin can change strategy
+- `test_SetStrategy_RevertIfEmergency` - Strategy cannot change during emergency mode; flags stay in sync
 - `test_SetProtocolFee_Success` - Protocol fee can be set
 - `test_SetProtocolFee_RevertIfTooHigh` - Fee cannot exceed 25%
 - `test_SetProtocolFee_RevertIfNotAdmin` - Only admin can set fee
@@ -132,8 +135,15 @@ test/
 - `test_SetEmergencyMode_Activate` - Emergency mode can be activated
 - `test_SetEmergencyMode_Deactivate` - Emergency mode can be deactivated
 - `test_EmergencyMode_BlocksDeposits` - Deposits blocked during emergency
+- `test_EmergencyMode_BlocksMints` - Mints blocked during emergency
 - `test_EmergencyMode_AllowsWithdrawals` - Withdrawals allowed during emergency (with `MockStrategy`)
 - `test_SetEmergencyMode_RevertIfNotAdmin` - Only admin can toggle emergency
+
+**ERC-4626 Limits**:
+- `test_MaxDeposit_ZeroDuringEmergency` - `maxDeposit` is 0 during emergency and unlimited after it
+- `test_MaxMint_ZeroDuringEmergency` - `maxMint` is 0 during emergency and unlimited after it
+- `test_MaxDeposit_ZeroForNonWhitelisted` - `maxDeposit` is 0 for a non-whitelisted receiver
+- `test_MaxMint_ZeroForNonWhitelisted` - `maxMint` is 0 for a non-whitelisted receiver
 
 **Constructor & State**:
 - `test_Constructor_RevertIfIncorrectInitialDeposit` - Validates initial deposit
@@ -145,14 +155,23 @@ test/
 - `test_HighWaterMark_DecreasesWithWithdrawals` - HWM decreases on withdrawal
 - `test_HighWaterMark_FullWithdrawal` - HWM handles full withdrawal
 
-### Whitelist.t.sol (17 tests)
+### Whitelist.t.sol (26 tests)
 
 **Whitelist Management**:
 - `test_AddToWhitelist_Success` - Owner can whitelist addresses
 - `test_AddToWhitelist_RevertIfNotOwner` - Only owner can whitelist
 - `test_RemoveFromWhitelist_Success` - Owner can remove from whitelist
 - `test_RemoveFromWhitelist_RevertIfNotOwner` - Only owner can remove
-- `test_AddMultipleToWhitelist` - Multiple addresses can be whitelisted (individual calls, not the batch functions)
+- `test_AddMultipleToWhitelist` - Multiple addresses can be whitelisted (individual calls)
+- `test_AddBatchToWhitelist_Success` - Batch add whitelists new addresses and emits only for them
+- `test_RemoveBatchFromWhitelist_Success` - Batch remove removes whitelisted addresses and emits only for them
+- `test_BatchWhitelist_RevertIfEmpty` - Both batch functions revert with `EmptyArray`
+- `test_BatchWhitelist_RevertIfNotOwner` - Both batch functions are owner-only
+
+**Ownership**:
+- `test_RenounceOwnership_RevertForOwner` - `renounceOwnership` reverts with `RenounceOwnershipDisabled`
+- `test_RenounceOwnership_RevertForNonOwner` - Same revert for any other caller
+- `test_TransferOwnership_StillWorks` - Ownership transfers and the new owner manages the whitelist
 
 **Deposit Enforcement**:
 - `test_Deposit_SuccessIfWhitelisted` - Whitelisted users can deposit
@@ -166,13 +185,15 @@ test/
 - `test_Transfer_RevertToNonWhitelisted` - Cannot transfer to non-whitelisted
 - `test_TransferFrom_SuccessToWhitelisted` - TransferFrom works with whitelist
 - `test_TransferFrom_RevertToNonWhitelisted` - TransferFrom respects whitelist
+- `test_Transfer_DuringEmergency` - During emergency, transfers to whitelisted succeed and to non-whitelisted revert
 
 **Withdrawal**:
 - `test_Withdraw_SuccessIfWhitelisted` - Whitelisted can withdraw
 - `test_Withdraw_AllowedAfterRemovalFromWhitelist` - Removed users can still withdraw
+- `test_Withdraw_RemovedUserDuringEmergency` - A removed user redeems in full during emergency
 - `test_Redeem_Success` - Users can redeem shares
 
-### AccessControl.t.sol (22 tests)
+### AccessControl.t.sol (27 tests)
 
 **Strategy Access Control**:
 - `test_Strategy_Deposit_RevertIfNotVault` - Only vault can deposit to strategy
@@ -184,6 +205,8 @@ test/
 - `test_Strategy_Redeem_SuccessFromVault` - Vault can redeem successfully
 - `test_Strategy_SetEmergencyMode_RevertIfNotVault` - Only vault can set emergency
 - `test_Strategy_SetEmergencyMode_SuccessFromVault` - Vault can set emergency
+- `test_Strategy_ExitPosition_RevertIfNotSelf` - `exitPosition` reverts with `OnlySelf` for an attacker and for the vault
+- `test_Strategy_Reinvest_RevertIfNotVault` - Only vault can call `strategy.reinvest`
 
 **Strategy Emergency Mode**:
 - `test_Strategy_EmergencyMode_BlocksDeposits` - Deposits blocked during emergency
@@ -193,6 +216,9 @@ test/
 **Vault Admin Control**:
 - `test_Vault_SetStrategy_RevertIfNotAdmin` - Non-admin cannot set strategy
 - `test_Vault_SetEmergencyMode_RevertIfNotAdmin` - Non-admin cannot set emergency
+- `test_Vault_ActivateEmergencyMode_RevertIfNotStrategy` - `activateEmergencyMode` reverts with `NotStrategy` for an attacker and for the admin
+- `test_Vault_Reinvest_RevertIfNotAdmin` - Non-admin cannot reinvest
+- `test_Vault_Reinvest_RevertIfNoStrategy` - `reinvest` reverts with `InvalidStrategy` without a strategy
 - `test_Vault_SetProtocolFee_RevertIfNotAdmin` - Non-admin cannot set fee
 - `test_Vault_SetFeeRecipient_RevertIfNotAdmin` - Non-admin cannot set recipient
 - `test_Vault_SetAdmin_RevertIfNotAdmin` - Non-admin cannot change admin
@@ -232,7 +258,7 @@ test/
 
 **Other Tests**:
 - `test_Deposit_BlockedDuringEmergency` - Emergency blocks deposits
-- `test_MaxDeposit_ReturnsMaxUint` - `maxDeposit` returns `type(uint256).max`
+- `test_MaxDeposit_ReturnsMaxUint` - `maxDeposit` returns `type(uint256).max` for a whitelisted receiver
 - `test_TotalAssets_WithStrategy` - TotalAssets includes strategy
 - `test_TotalAssets_WithoutStrategy` - TotalAssets without strategy
 
@@ -286,15 +312,31 @@ Shared with `integration/EmergencyAccountingFork.t.sol` (5 tests, all except the
 - `test_Donation_BeforeFirstDeposit_DoesNotDiluteDepositor` - A 1 WETH donation to the empty strategy leaves the first 1 WETH depositor at least 99.9999% of the deposit
 - `test_TotalAssets_NoDoubleCountingDuringFlashLoan` (mock only) - A test pool reads `totalAssets()` inside the flash loan callback; it equals previous equity plus the deposit, without the borrowed WETH
 
-### EmergencyActivation.t.sol (5 tests, review finding 2, mock)
+### EmergencyActivation.t.sol (6 tests, review finding 2, mock)
 
-Shared with `integration/EmergencyActivationFork.t.sol` (5 tests).
+Shared with `integration/EmergencyActivationFork.t.sol` (6 tests).
 
 - `test_AdminEmergency_WethLoop_ClosesPositionAndAllowsRedeem` - Admin activation repays all debt and the user redeems the pro rata share
 - `test_AdminEmergency_AaveSimple_ExitsAaveAndAllowsRedeem` - Admin activation withdraws the Aave supply and the user redeems the pro rata share
 - `test_AdminEmergency_ExitFailure_FallsBackToProportionalWithdrawals` - With no flash liquidity the exit fails, `EmergencyExitFailed` is emitted, emergency mode stays active and withdrawals deleverage proportionally once liquidity returns
 - `test_AdminEmergency_RetryClosesPosition` - A second activation closes the position after a failed exit
-- `test_AdminEmergency_RecoveryReinvests` - Deactivation rebuilds the 10x position without changing equity
+- `test_CheckHealth_RetriesFailedExit` - While the health factor is below `minHealthFactor`, a second `checkHealth()` closes the position after a failed exit
+- `test_CheckHealth_DoesNotRetryWhenHealthy` - With the health factor at or above `minHealthFactor`, `checkHealth()` returns true and leaves the position open
+
+### EmergencyRecovery.t.sol (6 tests, mock)
+
+Shared with `integration/EmergencyRecoveryFork.t.sol` (6 tests).
+
+- `test_Exit_DoesNotReinvest` - `setEmergencyMode(false)` clears both flags and leaves the recovered WETH idle
+- `test_Reinvest_RebuildsPositionAtTarget` - `reinvest()` rebuilds the 10x position without changing equity, health factor `>= targetHealthFactor`
+- `test_Reinvest_RevertsBelowTargetHealthFactor` - `HealthFactorBelowTarget` when the rebuilt position would sit below the target; idle WETH stays idle
+- `test_Reinvest_RevertsInEmergency` - `VaultInEmergency` from the vault and `StrategyInEmergency` from the strategy
+- `test_Exit_SucceedsWhenReinvestWouldRevert` - Without flash loan liquidity the exit succeeds, `reinvest()` reverts and withdrawals pay from idle WETH
+- `test_DepositAfterExit_InvestsOnlyTheDeposit` - Between exit and reinvest a deposit invests only itself at 10x; idle WETH waits for `reinvest()`
+
+### HealthFactorBounds.t.sol (8 tests)
+
+Constructor and `setHealthFactors()` each: `minHealthFactor = 1e18` reverts, `1e18 + 1` is accepted, `minHealthFactor = targetHealthFactor` reverts, `targetHealthFactor = minHealthFactor + 1` is accepted. Reverts check `InvalidHealthFactors(min, target)` with its arguments.
 
 ### FullExit.t.sol (3 tests, review finding 3, mock)
 
@@ -327,7 +369,7 @@ Emergency tests (the unhealthy state is simulated by raising `minHealthFactor` a
 - `test_CheckHealth_HealthyPosition` - Healthy position does not trigger emergency
 - `test_CheckHealth_TriggersEmergencyDivest` - Debt exactly 0, collateral at most 2 wei, recovered WETH within 10 wei of the deposit and counted by `totalAssets()`, deposits blocked
 - `test_EmergencyMode_WithdrawalsPaidFromIdleWeth` - Resets the vault to its initial deposit, then a vault redemption during emergency pays the pro rata share within 2 wei and the deposit within 10 wei
-- `test_RecoveryFromEmergency_ReinvestsAutomatically` - Admin deactivation reinvests at target leverage and deposits resume
+- `test_RecoveryFromEmergency_ExitThenReinvest` - Admin deactivation leaves the WETH idle; after restoring the thresholds, `reinvest()` rebuilds the position with health factor `>= targetHealthFactor` and deposits resume
 
 ### StrategyHealthCheck.t.sol (9 tests)
 
@@ -362,9 +404,9 @@ Emergency tests (the unhealthy state is simulated by raising `minHealthFactor` a
 - `test_ImmutableValues` - Immutable values set correctly
 - `test_EmergencyMode_Propagates` - Emergency mode propagation
 
-### Review finding fork tests (13 tests)
+### Shared fork tests (20 tests)
 
-`EmergencyAccountingFork.t.sol` (5), `EmergencyActivationFork.t.sol` (5) and `FullExitFork.t.sol` (3) run the same tests as their mock counterparts in `unit/`, against Aave V3 and Uniswap V4.
+`EmergencyAccountingFork.t.sol` (5), `EmergencyActivationFork.t.sol` (6), `EmergencyRecoveryFork.t.sol` (6) and `FullExitFork.t.sol` (3) run the same tests as their mock counterparts in `unit/`, against Aave V3 and Uniswap V4.
 
 ### LeverageBoundsFork.t.sol (3 tests)
 
@@ -420,7 +462,7 @@ Emergency tests (the unhealthy state is simulated by raising `minHealthFactor` a
 **Health Factor Fuzzing** (3 tests):
 - `testFuzz_HealthFactor_CustomThresholds` - `minHealthFactor` from 1.01 to 1.05
 - `testFuzz_CheckHealth_TriggersEmergency` - Emergency divest when `minHealthFactor` is raised 0.05 to 0.2 above the current health factor; debt exactly 0 and equity within 10 wei of the deposit
-- `testFuzz_Recovery_ReinvestsAfterEmergency` - Reinvestment after admin deactivation
+- `testFuzz_Recovery_ReinvestsAfterEmergency` - Admin deactivation, threshold reset and `reinvest()` rebuild the position
 
 **Share Conversion Fuzzing** (2 tests):
 - `testFuzz_ShareConversion_Consistency` - Conversions with leverage
@@ -479,7 +521,7 @@ Always uses `MockStrategy` and a mock ERC20, in both modes. Protocol fee 10%.
 - `invariant_HighWaterMarkFollowsDefinition` - HWM equals a model of its definition (`BaseVaultHandler.ghost_expectedHwm`: deposits added, withdrawals subtracted and floored at 0, raised to `totalAssets()` on fee assessment), and HWM `<= totalAssets() + 10 wei` since the suite has no loss source
 - `invariant_ProtocolFeeBounded` - Protocol fee `<= 2,500` bps
 
-Handlers: `BaseVaultHandler` (deposit, withdraw, transfer, assessFee, simulateYield) and `AdminHandler` (whitelist add and remove, fee changes, emergency toggle). `simulateYield` sends up to 10% of the strategy's assets to the strategy, only while it has shares outstanding. `AdminHandler` only removes addresses with a zero balance.
+Handlers: `BaseVaultHandler` (deposit, withdraw, transfer, assessFee, simulateYield) and `AdminHandler` (whitelist add and remove, fee changes, emergency toggle, reinvest). `simulateYield` sends up to 10% of the strategy's assets to the strategy, only while it has shares outstanding. `AdminHandler` only removes addresses with a zero balance.
 
 ### WETHLoopStrategyInvariant.t.sol (9 invariants)
 
@@ -493,11 +535,11 @@ Handlers: `BaseVaultHandler` (deposit, withdraw, transfer, assessFee, simulateYi
 - `invariant_MaxLeverageTracked` - Highest leverage observed by the handler `<= 14.00x`
 - `invariant_PositionValueConsistency` - `collateral + idle - debt` equals `ghost_expectedEquity` (deposits minus amounts pulled from the strategy plus interest measured on each warp), within 4 wei per Aave operation
 
-Handler: `WETHLoopStrategyHandler` (deposit 1 wei to 100 WETH through the vault, redeem 1% to 100%, `checkHealth()`, `triggerEmergency()`, `recover()`, time warp of 1 hour to 7 days). `triggerEmergency()` raises `minHealthFactor` above the current health factor, calls `checkHealth()` and restores the thresholds.
+Handler: `WETHLoopStrategyHandler` (deposit 1 wei to 100 WETH through the vault, redeem 1% to 100%, `checkHealth()`, `triggerEmergency()`, `recover()`, time warp of 1 hour to 7 days). `triggerEmergency()` raises `minHealthFactor` above the current health factor, calls `checkHealth()` and restores the thresholds. `recover()` deactivates emergency mode and then calls `reinvest()`.
 
 The 14x bound: with a 93% LTV the theoretical upper bound on leverage is `1 / (1 - 0.93) = 14.29x`, so the invariant checks that leverage never exceeds what the LTV allows, while the suite targets 10x.
 
-### IntegratedInvariant.t.sol (8 invariants)
+### IntegratedInvariant.t.sol (9 invariants)
 
 Protocol fee 10%.
 
@@ -509,8 +551,9 @@ Protocol fee 10%.
 - `invariant_HealthFactorSafe` - Health factor `>= minHealthFactor - 0.01` unless emergency mode is active
 - `invariant_WhitelistIntegrity` - Every actor holding shares is whitelisted
 - `invariant_FeeBounded` - Protocol fee `<= 2,500` bps
+- `invariant_ReinvestMeetsTargetHealthFactor` - After every successful `AdminHandler.reinvest()` the health factor is `>= targetHealthFactor` (`ghost_reinvestsBelowTarget == 0`)
 
-Handlers: all three, including `simulateYield`, `triggerEmergency` and `recover`. The admin handler's emergency toggle now closes the position on activation. Handler reverts are tolerated because `fail_on_revert = false`.
+Handlers: all three, including `simulateYield`, `triggerEmergency`, `recover` and the admin `reinvest`. The admin handler's emergency toggle closes the position on activation and only clears the flags on deactivation, so deposits can run between exit and reinvest. Handler reverts are tolerated because `fail_on_revert = false`.
 
 ### Configuration
 
@@ -530,7 +573,7 @@ fail_on_revert = false
 shrink_run_limit = 1000
 ```
 
-Mock mode: 25 functions x 256 runs x 50 depth = 320,000 handler calls.
+Mock mode: 26 functions x 256 runs x 50 depth = 332,800 handler calls.
 
 ### Mock vs Fork Mode
 
@@ -539,7 +582,7 @@ Mock mode: 25 functions x 256 runs x 50 depth = 320,000 handler calls.
 - `MockAavePool` does not accrue interest and does not enforce the LTV on borrow. The health factor stays at `10 * 0.95 / 9 = 1.0556` for every 10x position, so `checkHealth()` alone never triggers an emergency divest; `triggerEmergency()` and the admin handler do.
 - `MockPoolManager` charges no fee and only checks that its balance is restored.
 
-**Fork mode** runs `WETHLoopStrategyInvariant` and `IntegratedInvariant` against Aave V3 and Uniswap V4 at `FORK_BLOCK` with 20 runs x 10 depth (200 handler calls per invariant function). `BaseVaultInvariant` uses mocks in both modes. All 25 invariant functions passed in fork mode with `--threads 1`; the default parallel execution can hit RPC rate limits.
+**Fork mode** runs `WETHLoopStrategyInvariant` and `IntegratedInvariant` against Aave V3 and Uniswap V4 at `FORK_BLOCK` with 20 runs x 10 depth (200 handler calls per invariant function). `BaseVaultInvariant` uses mocks in both modes. All 26 invariant functions passed in fork mode with `--threads 1`; the default parallel execution can hit RPC rate limits.
 
 ```bash
 # Mock mode (default)
@@ -560,7 +603,7 @@ INVARIANT_USE_FORK=false  # Set to "true" for fork mode
 
 - Vault handler: `ghost_totalDeposited`, `ghost_totalWithdrawn`, `ghost_totalFeesMinted`, `ghost_expectedHwm`, `ghost_totalYield`, per-user deposits and withdrawals, operation counts
 - Strategy handler: `ghost_totalInvested`, `ghost_totalDivested`, `ghost_expectedEquity`, `ghost_interest`, `ghost_equityOps`, `ghost_emergencyRedeems`, `ghost_maxEmergencyRedeemError`, `ghost_recoveries`, `ghost_maxLeverageObserved`, `ghost_minHealthFactorObserved`, `ghost_healthCheckCalls`, `ghost_healthCheckFailures`, `ghost_emergencyDivestCount`
-- Admin handler: `ghost_whitelistAdditions`, `ghost_whitelistRemovals`, `ghost_feeChanges`, `ghost_emergencyModeChanges`
+- Admin handler: `ghost_whitelistAdditions`, `ghost_whitelistRemovals`, `ghost_feeChanges`, `ghost_emergencyModeChanges`, `ghost_reinvests`, `ghost_reinvestsBelowTarget`
 
 ## Gas Benchmark
 
@@ -570,7 +613,7 @@ INVARIANT_USE_FORK=false  # Set to "true" for fork mode
 - `test_Gas_Withdraw` - `vault.withdraw` of 0.5 WETH
 - `test_Gas_Redeem` - `vault.redeem` of all shares of the only depositor
 - `test_Gas_CheckHealthEmergencyDivest` - `strategy.checkHealth` on the emergency divest path
-- `test_Gas_Recovery` - `vault.setEmergencyMode(false)` after an emergency divest
+- `test_Gas_Recovery` - `vault.setEmergencyMode(false)` after an emergency divest, then `vault.reinvest`
 
 ```bash
 forge test --match-contract GasBenchmarkMockTest --gas-report
@@ -629,7 +672,7 @@ forge test --gas-report
 
 - Arrange-Act-Assert structure with `ARRANGE` / `ACT` / `ASSERT` section markers.
 - Revert conditions checked with `vm.expectRevert`.
-- Events checked with `vm.expectEmit` in `BaseVault.t.sol`, `Whitelist.t.sol` and `EmergencyActivation.t.sol`.
+- Events checked with `vm.expectEmit` in `BaseVault.t.sol`, `Whitelist.t.sol` and `EmergencyActivation.t.sol`, and counted with `vm.recordLogs` for the batch whitelist functions.
 - Regression tests for review findings run in both mock and fork mode from one abstract test contract.
 
 ## Dependencies
