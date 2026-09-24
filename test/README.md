@@ -2,18 +2,18 @@
 
 ## Overview
 
-The suite is organized into unit tests (mocked dependencies), integration tests (mainnet fork), stateless fuzz tests, stateful invariant tests with the handler pattern and a gas benchmark. Results below were obtained on commit `736405b` with Forge 1.7.1; fork suites run against Ethereum mainnet at block 26043110. See the [main README](../README.md) for the project status, trust assumptions and review notes.
+The suite is organized into unit tests (mocked dependencies), integration tests (mainnet fork), stateless fuzz tests, stateful invariant tests with the handler pattern and a gas benchmark. Results below were obtained on commit `4ae7b16` with Forge 1.7.1; fork suites run against Ethereum mainnet at block 26043110. See the [main README](../README.md) for the project status, trust assumptions and review notes.
 
 ## Test Statistics
 
 | Category | Location | Tests | Needs `ETHEREUM_MAINNET_RPC` |
 |----------|----------|-------|------------------------------|
-| Unit | `unit/` | 149 | No |
-| Integration | `integration/` | 62 | Yes |
+| Unit | `unit/` | 154 | No |
+| Integration | `integration/` | 67 | Yes |
 | Stateless fuzzing | `fuzz/` | 43 (15 mock, 28 fork) | For `WETHLoopStrategyFuzz` and `AaveSimpleStrategyFuzz` |
 | Stateful fuzzing (invariants) | `invariant/` | 26 | No in mock mode (default) |
 | Gas benchmark | `gas/` | 10 (5 mock, 5 fork) | For `GasBenchmarkForkTest` |
-| **Total** | | **290, all passing** | |
+| **Total** | | **300, all passing** | |
 
 Iterations:
 
@@ -21,7 +21,7 @@ Iterations:
 - Stateful: 26 invariant functions x 256 runs x 50 depth = 332,800 handler calls (`[invariant]` in `foundry.toml`). Forge reports `runs: 256, calls: 12800` for each invariant function.
 - Total: 343,808 fuzz runs and handler calls.
 
-Mock mode (no RPC) runs 195 tests:
+Mock mode (no RPC) runs 200 tests:
 
 ```bash
 forge test --no-match-path "test/{integration/*,fuzz/*StrategyFuzz.t.sol,gas/GasBenchmarkFork.t.sol}"
@@ -41,7 +41,7 @@ Without `ETHEREUM_MAINNET_RPC`, plain `forge test` fails in `setUp()` for the fo
 
 ## Code Coverage
 
-`forge coverage --no-match-coverage "(test|script|mock)"`, all 290 tests:
+`forge coverage --no-match-coverage "(test|script|mock)"`, all 300 tests:
 
 | File | Lines | Statements | Branches | Functions |
 |------|-------|------------|----------|-----------|
@@ -49,20 +49,20 @@ Without `ETHEREUM_MAINNET_RPC`, plain `forge test` fails in `setUp()` for the fo
 | `adapters/AaveAdapter.sol` | 100.00% (15/15) | 100.00% (17/17) | 100.00% (4/4) | 100.00% (4/4) |
 | `adapters/UniswapV4Adapter.sol` | 100.00% (24/24) | 100.00% (24/24) | 100.00% (2/2) | 100.00% (5/5) |
 | `base/BaseStrategy.sol` | 97.87% (46/47) | 91.43% (32/35) | 87.50% (7/8) | 100.00% (19/19) |
-| `base/BaseVault.sol` | 100.00% (121/121) | 97.01% (130/134) | 85.71% (24/28) | 100.00% (26/26) |
-| `strategies/AaveSimpleLendingStrategy.sol` | 100.00% (22/22) | 96.00% (24/25) | 66.67% (2/3) | 100.00% (7/7) |
-| `strategies/WETHLoopStrategy.sol` | 94.34% (100/106) | 85.71% (120/140) | 48.28% (14/29) | 100.00% (14/14) |
-| **Total** | **98.10% (361/368)** | **93.09% (377/405)** | **74.07% (60/81)** | **100.00% (82/82)** |
+| `base/BaseVault.sol` | 100.00% (126/126) | 96.50% (138/143) | 83.33% (25/30) | 100.00% (26/26) |
+| `strategies/AaveSimpleLendingStrategy.sol` | 100.00% (24/24) | 96.88% (31/32) | 75.00% (3/4) | 100.00% (7/7) |
+| `strategies/WETHLoopStrategy.sol` | 94.55% (104/110) | 86.39% (127/147) | 51.61% (16/31) | 100.00% (14/14) |
+| **Total** | **98.15% (372/379)** | **93.22% (399/428)** | **74.42% (64/86)** | **100.00% (82/82)** |
 
 Main gaps:
 
-- `WETHLoopStrategy.sol`: 15 of 29 branches, mostly error paths, are not covered.
+- `WETHLoopStrategy.sol`: 15 of 31 branches, mostly error paths, are not covered.
 
 ## Test Organization
 
 ```
 test/
-├── unit/                                   # Unit tests (149 tests)
+├── unit/                                   # Unit tests (154 tests)
 │   ├── BaseVault.t.sol                    # 28 tests - Vault admin functions and ERC-4626 limits
 │   ├── Whitelist.t.sol                    # 26 tests - Whitelist enforcement and ownership
 │   ├── AccessControl.t.sol                # 27 tests - Access control modifiers
@@ -73,17 +73,17 @@ test/
 │   ├── PerformanceFeeTiming.t.sol         #  2 tests - Review finding 5
 │   ├── EmergencyAccounting.t.sol          #  6 tests - Review finding 1 (mock)
 │   ├── EmergencyActivation.t.sol          #  6 tests - Review finding 2 and checkHealth retries (mock)
-│   ├── EmergencyRecovery.t.sol            #  6 tests - Two-step exit from emergency mode (mock)
+│   ├── EmergencyRecovery.t.sol            # 11 tests - Two-step exit, investment health and dust (mock)
 │   ├── HealthFactorBounds.t.sol           #  8 tests - 1e18 < minHealthFactor < targetHealthFactor
 │   └── FullExit.t.sol                     #  3 tests - Review finding 3 (mock)
-├── integration/                            # Integration tests, mainnet fork (62 tests)
+├── integration/                            # Integration tests, mainnet fork (67 tests)
 │   ├── AaveSimpleStrategyFork.t.sol       #  3 tests - Aave simple strategy
 │   ├── WETHLoopStrategy.t.sol             #  9 tests - WETH leveraged strategy and emergency flow
 │   ├── StrategyHealthCheck.t.sol          #  9 tests - Strategy health and harvest
 │   ├── WETHLoopStrategyErrorPaths.t.sol   # 18 tests - WETH strategy error paths and views
 │   ├── EmergencyAccountingFork.t.sol      #  5 tests - Review finding 1 (fork)
 │   ├── EmergencyActivationFork.t.sol      #  6 tests - Review finding 2 and checkHealth retries (fork)
-│   ├── EmergencyRecoveryFork.t.sol        #  6 tests - Two-step exit from emergency mode (fork)
+│   ├── EmergencyRecoveryFork.t.sol        # 11 tests - Two-step exit, investment health and dust (fork)
 │   ├── FullExitFork.t.sol                 #  3 tests - Review finding 3 (fork)
 │   └── LeverageBoundsFork.t.sol           #  3 tests - E-Mode parameters and leverage limits
 ├── fuzz/                                   # Stateless fuzzing (43 tests)
@@ -106,7 +106,7 @@ test/
 └── mocks/
     ├── MockStrategy.sol                   # Strategy that keeps funds in the contract
     ├── MockWETH.sol                       # WETH with mint/burn
-    ├── MockAavePool.sol                   # Aave V3 Pool simulation (supply is public virtual for test pools)
+    ├── MockAavePool.sol                   # Aave V3 Pool simulation (supply is public virtual for test pools; settable liquidity index, supplies that scale to 0 revert)
     ├── MockAToken.sol                     # aToken simulation
     ├── MockVariableDebtToken.sol          # Debt token simulation
     ├── MockPoolManager.sol                # Uniswap V4 PoolManager simulation (settle is public virtual)
@@ -323,9 +323,9 @@ Shared with `integration/EmergencyActivationFork.t.sol` (6 tests).
 - `test_CheckHealth_RetriesFailedExit` - While the health factor is below `minHealthFactor`, a second `checkHealth()` closes the position after a failed exit
 - `test_CheckHealth_DoesNotRetryWhenHealthy` - With the health factor at or above `minHealthFactor`, `checkHealth()` returns true and leaves the position open
 
-### EmergencyRecovery.t.sol (6 tests, mock)
+### EmergencyRecovery.t.sol (11 tests, mock)
 
-Shared with `integration/EmergencyRecoveryFork.t.sol` (6 tests).
+Shared with `integration/EmergencyRecoveryFork.t.sol` (11 tests).
 
 - `test_Exit_DoesNotReinvest` - `setEmergencyMode(false)` clears both flags and leaves the recovered WETH idle
 - `test_Reinvest_RebuildsPositionAtTarget` - `reinvest()` rebuilds the 10x position without changing equity, health factor `>= targetHealthFactor`
@@ -333,6 +333,11 @@ Shared with `integration/EmergencyRecoveryFork.t.sol` (6 tests).
 - `test_Reinvest_RevertsInEmergency` - `VaultInEmergency` from the vault and `StrategyInEmergency` from the strategy
 - `test_Exit_SucceedsWhenReinvestWouldRevert` - Without flash loan liquidity the exit succeeds, `reinvest()` reverts and withdrawals pay from idle WETH
 - `test_DepositAfterExit_InvestsOnlyTheDeposit` - Between exit and reinvest a deposit invests only itself at 10x; idle WETH waits for `reinvest()`
+- `test_DepositAfterExit_RevertsBelowMinHealthFactor` - With `minHealthFactor` above the 10x health factor, a deposit after exit reverts with `HealthFactorBelowMinimum`
+- `test_Reinvest_DustIdleStaysIdle` - Idle WETH below `MIN_INVEST_ASSETS` stays idle on `reinvest()` (at the pinned block, investing 1,000 wei at 10x reverted in Aave)
+- `test_Deposit_DustStaysIdleUntilReinvest` - A deposit of `MIN_INVEST_ASSETS - 1` stays idle and is invested by `reinvest()` once idle reaches the bound
+- `test_AaveSimple_DustStaysIdle` - A 1 wei deposit into the Aave simple strategy stays idle instead of reverting on a 0 scaled aToken mint (mock: liquidity index set to 1.05)
+- `test_Reinvest_MovesVaultIdleIntoStrategy` - `reinvest()` moves the vault's idle balance (initial deposit and a 1 WETH donation) into the strategy and invests it; `totalAssets()` unchanged
 
 ### HealthFactorBounds.t.sol (8 tests)
 
@@ -404,9 +409,9 @@ Emergency tests (the unhealthy state is simulated by raising `minHealthFactor` a
 - `test_ImmutableValues` - Immutable values set correctly
 - `test_EmergencyMode_Propagates` - Emergency mode propagation
 
-### Shared fork tests (20 tests)
+### Shared fork tests (25 tests)
 
-`EmergencyAccountingFork.t.sol` (5), `EmergencyActivationFork.t.sol` (6), `EmergencyRecoveryFork.t.sol` (6) and `FullExitFork.t.sol` (3) run the same tests as their mock counterparts in `unit/`, against Aave V3 and Uniswap V4.
+`EmergencyAccountingFork.t.sol` (5), `EmergencyActivationFork.t.sol` (6), `EmergencyRecoveryFork.t.sol` (11) and `FullExitFork.t.sol` (3) run the same tests as their mock counterparts in `unit/`, against Aave V3 and Uniswap V4.
 
 ### LeverageBoundsFork.t.sol (3 tests)
 
@@ -535,7 +540,7 @@ Handlers: `BaseVaultHandler` (deposit, withdraw, transfer, assessFee, simulateYi
 - `invariant_MaxLeverageTracked` - Highest leverage observed by the handler `<= 14.00x`
 - `invariant_PositionValueConsistency` - `collateral + idle - debt` equals `ghost_expectedEquity` (deposits minus amounts pulled from the strategy plus interest measured on each warp), within 4 wei per Aave operation
 
-Handler: `WETHLoopStrategyHandler` (deposit 1 wei to 100 WETH through the vault, redeem 1% to 100%, `checkHealth()`, `triggerEmergency()`, `recover()`, time warp of 1 hour to 7 days). `triggerEmergency()` raises `minHealthFactor` above the current health factor, calls `checkHealth()` and restores the thresholds. `recover()` deactivates emergency mode and then calls `reinvest()`.
+Handler: `WETHLoopStrategyHandler` (deposit 1 wei to 100 WETH through the vault, redeem 1% to 100%, `checkHealth()`, `triggerEmergency()`, `recover()`, time warp of 1 hour to 7 days). `triggerEmergency()` raises `minHealthFactor` above the current health factor, calls `checkHealth()` and restores the thresholds. `recover()` deactivates emergency mode and then calls `reinvest()`, adding the vault idle balance it moves into the strategy to `ghost_expectedEquity`.
 
 The 14x bound: with a 93% LTV the theoretical upper bound on leverage is `1 / (1 - 0.93) = 14.29x`, so the invariant checks that leverage never exceeds what the LTV allows, while the suite targets 10x.
 

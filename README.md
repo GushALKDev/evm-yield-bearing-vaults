@@ -5,8 +5,8 @@
 ![Solidity](https://img.shields.io/badge/Solidity-0.8.26-blue)
 ![Foundry](https://img.shields.io/badge/Built%20with-Foundry-orange)
 
-![Tests](https://img.shields.io/badge/Tests-290%20passing-brightgreen)
-![Coverage](https://img.shields.io/badge/Line%20coverage-98.10%25-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-300%20passing-brightgreen)
+![Coverage](https://img.shields.io/badge/Line%20coverage-98.15%25-brightgreen)
 ![Invariants](https://img.shields.io/badge/Invariants-26-blue)
 ![Fuzzing](https://img.shields.io/badge/Fuzzing-331%2C008%20runs%20%2B%20calls-blue)
 
@@ -346,26 +346,26 @@ INVARIANT_USE_FORK=true FOUNDRY_PROFILE=fork-invariant forge test --match-path "
 
 ## Testing
 
-Results below were obtained on commit `736405b` with Forge 1.7.1, fork suites at block 26043110.
+Results below were obtained on commit `4ae7b16` with Forge 1.7.1, fork suites at block 26043110.
 
 ### Test statistics
 
 | Category | Location | Tests | Needs RPC | Iterations |
 |----------|----------|-------|-----------|------------|
-| Unit (mocks) | `test/unit` | 149 | No | - |
-| Integration (fork) | `test/integration` | 62 | Yes | - |
+| Unit (mocks) | `test/unit` | 154 | No | - |
+| Integration (fork) | `test/integration` | 67 | Yes | - |
 | Stateless fuzzing | `test/fuzz` | 43 (15 mock, 28 fork) | For 28 of them | 43 x 256 runs = 11,008 |
 | Stateful fuzzing (invariants) | `test/invariant` | 26 | No (mock mode) | 26 x 256 runs x 50 depth = 332,800 handler calls |
 | Gas benchmark | `test/gas` | 10 (5 mock, 5 fork) | For 5 of them | - |
-| **Total** | | **290, all passing** | | **343,808 fuzz runs and handler calls** |
+| **Total** | | **300, all passing** | | **343,808 fuzz runs and handler calls** |
 
-Mock mode runs 195 of them (149 unit, 15 fuzz, 26 invariants, 5 gas). Without `ETHEREUM_MAINNET_RPC`, plain `forge test` fails in `setUp()` for the fork suites; use the mock mode command above.
+Mock mode runs 200 of them (154 unit, 15 fuzz, 26 invariants, 5 gas). Without `ETHEREUM_MAINNET_RPC`, plain `forge test` fails in `setUp()` for the fork suites; use the mock mode command above.
 
 Fork mode for the invariant suites uses 20 runs x 10 depth; all 26 invariant functions passed with `--threads 1`.
 
 ### Coverage
 
-`forge coverage --no-match-coverage "(test|script|mock)"`, all 290 tests:
+`forge coverage --no-match-coverage "(test|script|mock)"`, all 300 tests:
 
 | File | Lines | Statements | Branches | Functions |
 |------|-------|------------|----------|-----------|
@@ -373,10 +373,10 @@ Fork mode for the invariant suites uses 20 runs x 10 depth; all 26 invariant fun
 | `adapters/AaveAdapter.sol` | 100.00% (15/15) | 100.00% (17/17) | 100.00% (4/4) | 100.00% (4/4) |
 | `adapters/UniswapV4Adapter.sol` | 100.00% (24/24) | 100.00% (24/24) | 100.00% (2/2) | 100.00% (5/5) |
 | `base/BaseStrategy.sol` | 97.87% (46/47) | 91.43% (32/35) | 87.50% (7/8) | 100.00% (19/19) |
-| `base/BaseVault.sol` | 100.00% (121/121) | 97.01% (130/134) | 85.71% (24/28) | 100.00% (26/26) |
-| `strategies/AaveSimpleLendingStrategy.sol` | 100.00% (22/22) | 96.00% (24/25) | 66.67% (2/3) | 100.00% (7/7) |
-| `strategies/WETHLoopStrategy.sol` | 94.34% (100/106) | 85.71% (120/140) | 48.28% (14/29) | 100.00% (14/14) |
-| **Total** | **98.10% (361/368)** | **93.09% (377/405)** | **74.07% (60/81)** | **100.00% (82/82)** |
+| `base/BaseVault.sol` | 100.00% (126/126) | 96.50% (138/143) | 83.33% (25/30) | 100.00% (26/26) |
+| `strategies/AaveSimpleLendingStrategy.sol` | 100.00% (24/24) | 96.88% (31/32) | 75.00% (3/4) | 100.00% (7/7) |
+| `strategies/WETHLoopStrategy.sol` | 94.55% (104/110) | 86.39% (127/147) | 51.61% (16/31) | 100.00% (14/14) |
+| **Total** | **98.15% (372/379)** | **93.22% (399/428)** | **74.42% (64/86)** | **100.00% (82/82)** |
 
 ### Stateless fuzzing
 
@@ -434,7 +434,7 @@ The repository does not contain before and after measurements for these changes.
 
 ### Measured costs
 
-From the committed harness in `test/gas/`, commit `736405b`, reproducible with:
+From the committed harness in `test/gas/`, commit `4ae7b16`, reproducible with:
 
 ```bash
 forge test --match-contract GasBenchmarkMockTest --gas-report
@@ -448,12 +448,12 @@ forge test --match-contract GasBenchmarkForkTest --gas-report
 
 | Function | Scenario | Mock mode | Mainnet fork |
 |----------|----------|-----------|--------------|
-| `vault.deposit` | 1 WETH into an existing 10x position | 265,760 | 397,167 |
+| `vault.deposit` | 1 WETH into an existing 10x position | 274,598 | 420,375 |
 | `vault.withdraw` | 0.5 WETH from a 1 WETH position | 260,648 | 397,871 |
 | `vault.redeem` | All shares of the only depositor (position closed) | 253,397 | 359,438 |
-| `strategy.checkHealth` | Emergency divest of 10 WETH collateral / 9 WETH debt | 215,048 | 345,000 |
+| `strategy.checkHealth` | Emergency divest of 10 WETH collateral / 9 WETH debt | 215,013 | 345,000 |
 | `vault.setEmergencyMode(false)` | Recovery step 1, clears the flags | 34,519 | 34,519 |
-| `vault.reinvest` | Recovery step 2, reinvest about 1 WETH at 10x and check the health factor | 218,636 | 330,709 |
+| `vault.reinvest` | Recovery step 2: moves the vault's 1,000 wei into the strategy, reinvests about 1 WETH at 10x and checks the health factor | 255,514 | 396,267 |
 
 Mock mode uses `MockAavePool`, `MockPoolManager` and `MockWETH`, whose gas costs are not representative of the real protocols.
 
@@ -476,7 +476,7 @@ Mock mode uses `MockAavePool`, `MockPoolManager` and `MockWETH`, whose gas costs
 - [x] Permissionless health check with emergency divest
 - [x] Two-step emergency recovery with a `targetHealthFactor` check on reinvestment
 - [x] Fixes for the review findings (see [Review notes](#review-notes))
-- [x] Test suite (290 tests, 98.10% line coverage)
+- [x] Test suite (300 tests, 98.15% line coverage)
 - [x] Stateless fuzzing (43 tests, 11,008 runs)
 - [x] Stateful fuzzing (26 invariant functions, 332,800 handler calls)
 - [x] Gas benchmark harness (mock and fork)
