@@ -286,6 +286,25 @@ contract BaseVaultTest is Test {
     }
 
     /**
+     * @notice Tests that mints are blocked during emergency mode.
+     */
+    function test_EmergencyMode_BlocksMints() public {
+        // ============ ARRANGE ============
+        vm.prank(owner);
+        vault.addToWhitelist(alice);
+
+        vm.prank(admin);
+        vault.setEmergencyMode(true);
+
+        // ============ ACT & ASSERT ============
+        vm.startPrank(alice);
+        asset.approve(address(vault), DEPOSIT_AMOUNT);
+        vm.expectRevert(abi.encodeWithSignature("VaultInEmergency()"));
+        vault.mint(DEPOSIT_AMOUNT, alice);
+        vm.stopPrank();
+    }
+
+    /**
      * @notice Tests that withdrawals are allowed during emergency mode.
      */
     function test_EmergencyMode_AllowsWithdrawals() public {

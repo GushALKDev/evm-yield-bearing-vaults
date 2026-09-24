@@ -230,6 +230,20 @@ contract AccessControlTest is Test {
         assertTrue(strategy.emergencyMode(), "Emergency mode should be activated");
     }
 
+    /**
+     * @notice Tests that exitPosition() only accepts calls from the strategy itself.
+     */
+    function test_Strategy_ExitPosition_RevertIfNotSelf() public {
+        // ============ ACT & ASSERT ============
+        vm.prank(attacker);
+        vm.expectRevert(abi.encodeWithSignature("OnlySelf()"));
+        strategy.exitPosition();
+
+        vm.prank(address(vault));
+        vm.expectRevert(abi.encodeWithSignature("OnlySelf()"));
+        strategy.exitPosition();
+    }
+
     /*//////////////////////////////////////////////////////////////
                     STRATEGY EMERGENCY MODE BEHAVIOR
     //////////////////////////////////////////////////////////////*/
@@ -323,6 +337,22 @@ contract AccessControlTest is Test {
         vm.prank(attacker);
         vm.expectRevert(abi.encodeWithSignature("NotAdmin()"));
         vault.setEmergencyMode(true);
+    }
+
+    /**
+     * @notice Tests that only the strategy can call activateEmergencyMode(), not an attacker or the admin.
+     */
+    function test_Vault_ActivateEmergencyMode_RevertIfNotStrategy() public {
+        // ============ ACT & ASSERT ============
+        vm.prank(attacker);
+        vm.expectRevert(abi.encodeWithSignature("NotStrategy()"));
+        vault.activateEmergencyMode();
+
+        vm.prank(admin);
+        vm.expectRevert(abi.encodeWithSignature("NotStrategy()"));
+        vault.activateEmergencyMode();
+
+        assertFalse(vault.emergencyMode(), "Emergency mode should stay off");
     }
 
     /**

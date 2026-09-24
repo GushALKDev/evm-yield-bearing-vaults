@@ -101,6 +101,49 @@ abstract contract EmergencyActivationTestBase is StrategyTestBase {
         assertEq(IERC20(debtToken).balanceOf(address(strategy)), 0, "Retry should close the position");
     }
 
+    /// @notice checkHealth() retries a failed exit while the health factor is still below minHealthFactor.
+    function test_CheckHealth_RetriesFailedExit() public {
+        // ============ ARRANGE: FIRST EXIT FAILS ============
+        (YieldBearingVault vault, WETHLoopStrategy strategy) = _deployWethLoop();
+        _deposit(vault, alice, 1 ether);
+        _makeUnhealthy(strategy);
+        uint256 poolManagerBalance = weth.balanceOf(poolManager);
+        _setPoolManagerBalance(0);
+
+        vm.expectEmit(false, false, false, false, address(strategy));
+        emit BaseStrategy.EmergencyExitFailed("");
+        assertFalse(strategy.checkHealth(), "Position should be unhealthy");
+        assertGt(IERC20(debtToken).balanceOf(address(strategy)), 0, "Position stays open when the exit fails");
+
+        // ============ ACT ============
+        _setPoolManagerBalance(poolManagerBalance);
+        bool healthy = strategy.checkHealth();
+
+        // ============ ASSERT ============
+        assertFalse(healthy, "The retry still reports the unhealthy position");
+        assertEq(IERC20(debtToken).balanceOf(address(strategy)), 0, "Retry should close the position");
+        assertTrue(vault.emergencyMode(), "Emergency mode stays active");
+    }
+
+    /// @notice checkHealth() does not retry a failed exit when the health factor is at or above minHealthFactor.
+    function test_CheckHealth_DoesNotRetryWhenHealthy() public {
+        // ============ ARRANGE: ADMIN EXIT FAILS ON A HEALTHY POSITION ============
+        (YieldBearingVault vault, WETHLoopStrategy strategy) = _deployWethLoop();
+        _deposit(vault, alice, 1 ether);
+        uint256 poolManagerBalance = weth.balanceOf(poolManager);
+        _setPoolManagerBalance(0);
+        vm.prank(admin);
+        vault.setEmergencyMode(true);
+        _setPoolManagerBalance(poolManagerBalance);
+
+        // ============ ACT ============
+        bool healthy = strategy.checkHealth();
+
+        // ============ ASSERT ============
+        assertTrue(healthy, "Position is healthy");
+        assertGt(IERC20(debtToken).balanceOf(address(strategy)), 0, "checkHealth() should not retry the exit");
+    }
+
     function _setPoolManagerBalance(uint256 amount) internal {
         if (_useFork()) {
             deal(address(weth), poolManager, amount);

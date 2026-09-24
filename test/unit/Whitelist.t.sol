@@ -391,6 +391,64 @@ contract WhitelistTest is Test {
     }
 
     /**
+     * @notice Tests that a user removed from the whitelist can withdraw during emergency mode.
+     */
+    function test_Withdraw_RemovedUserDuringEmergency() public {
+        // ============ ARRANGE: ALICE DEPOSITS, IS REMOVED, EMERGENCY STARTS ============
+        vm.prank(owner);
+        vault.addToWhitelist(alice);
+
+        vm.startPrank(alice);
+        asset.approve(address(vault), DEPOSIT_AMOUNT);
+        vault.deposit(DEPOSIT_AMOUNT, alice);
+        vm.stopPrank();
+
+        vm.prank(owner);
+        vault.removeFromWhitelist(alice);
+        vm.prank(admin);
+        vault.setEmergencyMode(true);
+
+        // ============ ACT ============
+        uint256 balanceBefore = asset.balanceOf(alice);
+        uint256 shares = vault.balanceOf(alice);
+        vm.prank(alice);
+        vault.redeem(shares, alice, alice);
+
+        // ============ ASSERT ============
+        assertEq(asset.balanceOf(alice) - balanceBefore, DEPOSIT_AMOUNT, "Alice should recover the deposit");
+        assertEq(vault.balanceOf(alice), 0, "Alice should have no shares left");
+    }
+
+    /**
+     * @notice Tests that share transfers keep the whitelist rule during emergency mode.
+     */
+    function test_Transfer_DuringEmergency() public {
+        // ============ ARRANGE ============
+        vm.startPrank(owner);
+        vault.addToWhitelist(alice);
+        vault.addToWhitelist(bob);
+        vm.stopPrank();
+
+        vm.startPrank(alice);
+        asset.approve(address(vault), DEPOSIT_AMOUNT);
+        uint256 shares = vault.deposit(DEPOSIT_AMOUNT, alice);
+        vm.stopPrank();
+
+        vm.prank(admin);
+        vault.setEmergencyMode(true);
+
+        // ============ ACT & ASSERT: TO WHITELISTED SUCCEEDS ============
+        vm.prank(alice);
+        vault.transfer(bob, shares / 2);
+        assertEq(vault.balanceOf(bob), shares / 2, "Bob should receive shares during emergency");
+
+        // ============ ACT & ASSERT: TO NON-WHITELISTED REVERTS ============
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSignature("NotWhitelisted(address)", charlie));
+        vault.transfer(charlie, shares / 2);
+    }
+
+    /**
      * @notice Tests that removed user cannot deposit again.
      */
     function test_Deposit_BlockedAfterRemovalFromWhitelist() public {
