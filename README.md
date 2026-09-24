@@ -5,9 +5,9 @@
 ![Solidity](https://img.shields.io/badge/Solidity-0.8.26-blue)
 ![Foundry](https://img.shields.io/badge/Built%20with-Foundry-orange)
 
-![Tests](https://img.shields.io/badge/Tests-300%20passing-brightgreen)
-![Coverage](https://img.shields.io/badge/Line%20coverage-98.15%25-brightgreen)
-![Invariants](https://img.shields.io/badge/Invariants-26-blue)
+![Tests](https://img.shields.io/badge/Tests-318%20passing-brightgreen)
+![Coverage](https://img.shields.io/badge/Line%20coverage-98.56%25-brightgreen)
+![Invariants](https://img.shields.io/badge/Invariants-27-blue)
 ![Fuzzing](https://img.shields.io/badge/Fuzzing-331%2C008%20runs%20%2B%20calls-blue)
 
 A modular ERC-4626 vault with pluggable strategies. The repository contains a simple Aave V3 supply strategy and a leveraged WETH loop strategy that uses Uniswap V4 flash loans and Aave V3 E-Mode.
@@ -346,56 +346,57 @@ INVARIANT_USE_FORK=true FOUNDRY_PROFILE=fork-invariant forge test --match-path "
 
 ## Testing
 
-Results below were obtained on commit `4ae7b16` with Forge 1.7.1, fork suites at block 26043110.
+Results below were obtained on commit `93e7f21` with Forge 1.7.1, fork suites at block 26043110.
 
 ### Test statistics
 
 | Category | Location | Tests | Needs RPC | Iterations |
 |----------|----------|-------|-----------|------------|
-| Unit (mocks) | `test/unit` | 154 | No | - |
-| Integration (fork) | `test/integration` | 67 | Yes | - |
-| Stateless fuzzing | `test/fuzz` | 43 (15 mock, 28 fork) | For 28 of them | 43 x 256 runs = 11,008 |
-| Stateful fuzzing (invariants) | `test/invariant` | 26 | No (mock mode) | 26 x 256 runs x 50 depth = 332,800 handler calls |
+| Unit (mocks) | `test/unit` | 162 | No | - |
+| Integration (fork) | `test/integration` | 74 | Yes | - |
+| Stateless fuzzing | `test/fuzz` | 45 (16 mock, 29 fork) | For 29 of them | 45 x 256 runs = 11,520 |
+| Stateful fuzzing (invariants) | `test/invariant` | 27 | No (mock mode) | 27 x 256 runs x 50 depth = 345,600 handler calls |
 | Gas benchmark | `test/gas` | 10 (5 mock, 5 fork) | For 5 of them | - |
-| **Total** | | **300, all passing** | | **343,808 fuzz runs and handler calls** |
+| **Total** | | **318, all passing** | | **357,120 fuzz runs and handler calls** |
 
-Mock mode runs 200 of them (154 unit, 15 fuzz, 26 invariants, 5 gas). Without `ETHEREUM_MAINNET_RPC`, plain `forge test` fails in `setUp()` for the fork suites; use the mock mode command above.
+Mock mode runs 210 of them (162 unit, 16 fuzz, 27 invariants, 5 gas). Without `ETHEREUM_MAINNET_RPC`, plain `forge test` fails in `setUp()` for the fork suites; use the mock mode command above.
 
-Fork mode for the invariant suites uses 20 runs x 10 depth; all 26 invariant functions passed with `--threads 1`.
+Fork mode for the invariant suites uses 20 runs x 10 depth; all 27 invariant functions passed with `--threads 1`.
 
 ### Coverage
 
-`forge coverage --no-match-coverage "(test|script|mock)"`, all 300 tests:
+`forge coverage --no-match-coverage "(test|script|mock)"`, all 318 tests:
 
 | File | Lines | Statements | Branches | Functions |
 |------|-------|------------|----------|-----------|
 | `access/Whitelist.sol` | 100.00% (33/33) | 100.00% (30/30) | 100.00% (7/7) | 100.00% (7/7) |
 | `adapters/AaveAdapter.sol` | 100.00% (15/15) | 100.00% (17/17) | 100.00% (4/4) | 100.00% (4/4) |
 | `adapters/UniswapV4Adapter.sol` | 100.00% (24/24) | 100.00% (24/24) | 100.00% (2/2) | 100.00% (5/5) |
-| `base/BaseStrategy.sol` | 97.87% (46/47) | 91.43% (32/35) | 87.50% (7/8) | 100.00% (19/19) |
-| `base/BaseVault.sol` | 100.00% (126/126) | 96.50% (138/143) | 83.33% (25/30) | 100.00% (26/26) |
+| `base/BaseStrategy.sol` | 100.00% (57/57) | 97.78% (44/45) | 90.00% (9/10) | 100.00% (21/21) |
+| `base/BaseVault.sol` | 100.00% (134/134) | 96.75% (149/154) | 83.87% (26/31) | 100.00% (27/27) |
 | `strategies/AaveSimpleLendingStrategy.sol` | 100.00% (24/24) | 96.88% (31/32) | 75.00% (3/4) | 100.00% (7/7) |
-| `strategies/WETHLoopStrategy.sol` | 94.55% (104/110) | 86.39% (127/147) | 51.61% (16/31) | 100.00% (14/14) |
-| **Total** | **98.15% (372/379)** | **93.22% (399/428)** | **74.42% (64/86)** | **100.00% (82/82)** |
+| `strategies/WETHLoopStrategy.sol` | 95.38% (124/130) | 88.89% (160/180) | 58.33% (21/36) | 100.00% (19/19) |
+| **Total** | **98.56% (411/417)** | **94.40% (455/482)** | **76.60% (72/94)** | **100.00% (90/90)** |
 
 ### Stateless fuzzing
 
-43 tests, 256 runs each (Foundry default; `foundry.toml` does not set `fuzz.runs`).
+45 tests, 256 runs each (Foundry default; `foundry.toml` does not set `fuzz.runs`).
 
 | Suite | Tests | Mode | Focus |
 |-------|-------|------|-------|
 | `BaseVaultFuzz` | 15 | Mock | Deposits (1 wei to 1,000,000 tokens), withdrawals, fees (0 to 2,500 bps), emergency mode, conversions |
 | `WETHLoopStrategyFuzz` | 13 | Fork | Deposits (0.1 to 5 WETH), leverage targets 5x to 10x, withdrawals 10% to 90%, `minHealthFactor` 1.01 to 1.05, emergency divest and recovery |
 | `AaveSimpleStrategyFuzz` | 15 | Fork | Deposits (100 to 100,000 USDC), 2 to 5 users, yield over 1 to 30 days, conversions |
+| `MaxDepositFuzz` / `MaxDepositStrategyFuzz` | 1 + 1 | Mock / Fork | With `maxDeposit()` not 0, a deposit never reverts with `HealthFactorBelowMinimum` (existing position 2x to 14x, target 2x to 14x, `minHealthFactor` within 0.2% of the lower health factor) |
 
 ### Stateful fuzzing (invariants)
 
-26 invariant functions with the handler pattern, 256 runs x 50 depth each (`[invariant]` in `foundry.toml`). Handler statistics are logged by `afterInvariant()` hooks, which are not counted as invariants.
+27 invariant functions with the handler pattern, 256 runs x 50 depth each (`[invariant]` in `foundry.toml`). Handler statistics are logged by `afterInvariant()` hooks, which are not counted as invariants.
 
 | Suite | Invariants | Handlers |
 |-------|------------|----------|
 | `BaseVaultInvariant` | 8 | `BaseVaultHandler` (deposit, withdraw, transfer, assessFee, simulateYield), `AdminHandler` (whitelist, fee, emergency toggle, reinvest) |
-| `WETHLoopStrategyInvariant` | 9 | `WETHLoopStrategyHandler` (deposit, withdraw, checkHealth, triggerEmergency, recover (exit then reinvest), warpTime) |
+| `WETHLoopStrategyInvariant` | 10 | `WETHLoopStrategyHandler` (deposit, withdraw, checkHealth, triggerEmergency, recover (exit then reinvest), setMinHealthFactor, warpTime) |
 | `IntegratedInvariant` | 9 | All three |
 
 What the main invariants check:
@@ -411,6 +412,7 @@ What the main invariants check:
 - Leverage `collateral / (collateral - debt) <= 14.00x`. With a 93% LTV the theoretical upper bound is `1 / (1 - 0.93) = 14.29x`, so the invariant checks that leverage never exceeds what the LTV allows, while the strategy targets 10x.
 - Health factor `>= minHealthFactor - 0.01` unless emergency mode is active; emergency flags of vault and strategy are equal; every actor holding shares is whitelisted; protocol fee `<= 2,500` bps.
 - After every successful `reinvest()` through the admin handler, the health factor is `>= targetHealthFactor`.
+- No deposit reverts with `HealthFactorBelowMinimum` while `maxDeposit()` reports a non-zero limit.
 
 Mock mode limitations: `MockAavePool` does not accrue interest and does not enforce the LTV on borrow, so leverage stays at the configured 10x and the health factor stays at `10 * 0.95 / 9`. Emergency mode is reached through `triggerEmergency()` (which raises `minHealthFactor` above the current health factor) and the admin handler.
 
@@ -434,7 +436,7 @@ The repository does not contain before and after measurements for these changes.
 
 ### Measured costs
 
-From the committed harness in `test/gas/`, commit `4ae7b16`, reproducible with:
+From the committed harness in `test/gas/`, commit `93e7f21`, reproducible with:
 
 ```bash
 forge test --match-contract GasBenchmarkMockTest --gas-report
@@ -448,12 +450,12 @@ forge test --match-contract GasBenchmarkForkTest --gas-report
 
 | Function | Scenario | Mock mode | Mainnet fork |
 |----------|----------|-----------|--------------|
-| `vault.deposit` | 1 WETH into an existing 10x position | 274,598 | 420,375 |
-| `vault.withdraw` | 0.5 WETH from a 1 WETH position | 260,648 | 397,871 |
-| `vault.redeem` | All shares of the only depositor (position closed) | 253,397 | 359,438 |
-| `strategy.checkHealth` | Emergency divest of 10 WETH collateral / 9 WETH debt | 215,013 | 345,000 |
+| `vault.deposit` | 1 WETH into an existing 10x position | 275,821 | 419,891 |
+| `vault.withdraw` | 0.5 WETH from a 1 WETH position | 260,674 | 397,925 |
+| `vault.redeem` | All shares of the only depositor (position closed) | 253,406 | 359,470 |
+| `strategy.checkHealth` | Emergency divest of 10 WETH collateral / 9 WETH debt | 216,695 | 345,022 |
 | `vault.setEmergencyMode(false)` | Recovery step 1, clears the flags | 34,519 | 34,519 |
-| `vault.reinvest` | Recovery step 2: moves the vault's 1,000 wei into the strategy, reinvests about 1 WETH at 10x and checks the health factor | 255,514 | 396,267 |
+| `vault.reinvest` | Recovery step 2: moves the vault's 1,000 wei into the strategy, reinvests about 1 WETH at 10x and checks the health factor | 257,200 | 396,260 |
 
 Mock mode uses `MockAavePool`, `MockPoolManager` and `MockWETH`, whose gas costs are not representative of the real protocols.
 
@@ -476,9 +478,9 @@ Mock mode uses `MockAavePool`, `MockPoolManager` and `MockWETH`, whose gas costs
 - [x] Permissionless health check with emergency divest
 - [x] Two-step emergency recovery with a `targetHealthFactor` check on reinvestment
 - [x] Fixes for the review findings (see [Review notes](#review-notes))
-- [x] Test suite (300 tests, 98.15% line coverage)
-- [x] Stateless fuzzing (43 tests, 11,008 runs)
-- [x] Stateful fuzzing (26 invariant functions, 332,800 handler calls)
+- [x] Test suite (318 tests, 98.56% line coverage)
+- [x] Stateless fuzzing (45 tests, 11,520 runs)
+- [x] Stateful fuzzing (27 invariant functions, 345,600 handler calls)
 - [x] Gas benchmark harness (mock and fork)
 - [ ] Keeper for `checkHealth()`
 - [ ] Loop strategies with yield-bearing collateral (stETH, rETH, cbETH)
