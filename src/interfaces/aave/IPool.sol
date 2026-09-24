@@ -6,6 +6,12 @@ pragma solidity 0.8.26;
  * @notice Interface for Aave V3 Pool contract.
  */
 interface IPool {
+    struct CollateralConfig {
+        uint16 ltv;
+        uint16 liquidationThreshold;
+        uint16 liquidationBonus;
+    }
+
     struct EModeCategory {
         uint16 ltv;
         uint16 liquidationThreshold;
@@ -58,6 +64,16 @@ interface IPool {
         );
 
     function getEModeCategoryData(uint8 id) external view returns (EModeCategory memory);
+
+    /**
+     * @return LTV, liquidation threshold and liquidation bonus of an E-Mode category, in bps.
+     */
+    function getEModeCategoryCollateralConfig(uint8 id) external view returns (CollateralConfig memory);
+
+    /**
+     * @return Reserve configuration bitmap (ReserveConfigurationMap.data): bits 0-15 LTV, bits 16-31 liquidation threshold.
+     */
+    function getConfiguration(address asset) external view returns (uint256);
 
     /**
      * @return Liquidity index of the reserve (ray, 1e27): supplied amounts are minted as amount / index scaled aTokens.

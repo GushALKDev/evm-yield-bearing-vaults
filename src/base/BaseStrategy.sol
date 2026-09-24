@@ -98,17 +98,39 @@ abstract contract BaseStrategy is ERC4626 {
     //////////////////////////////////////////////////////////////*/
 
     /**
-     * @dev Blocked during emergency mode.
+     * @dev Blocked during emergency mode. The limits that maxDeposit() reports are enforced where they apply
+     *      (emergency mode by the modifier, strategy-specific checks in _invest()), so the ERC4626 comparison with
+     *      maxDeposit() is not repeated here: it would duplicate those reads and hide the specific revert reason.
      */
     function deposit(uint256 assets, address receiver) public virtual override onlyVault whenNotEmergency returns (uint256) {
-        return super.deposit(assets, receiver);
+        uint256 shares = previewDeposit(assets);
+        _deposit(_msgSender(), receiver, assets, shares);
+        return shares;
     }
 
     /**
-     * @dev Blocked during emergency mode.
+     * @dev Blocked during emergency mode. Same limit handling as deposit().
      */
     function mint(uint256 shares, address receiver) public virtual override onlyVault whenNotEmergency returns (uint256) {
-        return super.mint(shares, receiver);
+        uint256 assets = previewMint(shares);
+        _deposit(_msgSender(), receiver, assets, shares);
+        return assets;
+    }
+
+    /**
+     * @dev 0 during emergency mode, since deposit() reverts.
+     */
+    function maxDeposit(address receiver) public view virtual override returns (uint256) {
+        if (emergencyMode) return 0;
+        return super.maxDeposit(receiver);
+    }
+
+    /**
+     * @dev 0 during emergency mode, since mint() reverts.
+     */
+    function maxMint(address receiver) public view virtual override returns (uint256) {
+        if (emergencyMode) return 0;
+        return super.maxMint(receiver);
     }
 
     /**

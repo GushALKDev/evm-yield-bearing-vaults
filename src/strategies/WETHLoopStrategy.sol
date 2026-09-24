@@ -64,6 +64,17 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
      */
     uint256 public constant HEALTH_FACTOR_FLOOR = 1e18;
 
+    /**
+     * @dev Safety margin (0.1%) applied by maxDeposit() and maxMint() to the health factors they compare with
+     *      minHealthFactor. Aave values collateral rounding down and debt rounding up in its 8-decimal base currency,
+     *      so a real position sits slightly below L * LT / (L - 1). The smallest slice that is invested is
+     *      MIN_INVEST_ASSETS (1e12 wei); its debt is at least 1e12 wei, worth 100 * P base units at a WETH price of
+     *      P USD, so the rounding costs at most about 3 / (100 * P) of the health factor: under 0.1% for P above 30 USD.
+     */
+    uint256 public constant HEALTH_FACTOR_MARGIN_BPS = 10;
+
+    uint256 private constant BPS = 10_000;
+
     /*//////////////////////////////////////////////////////////////
                                  ERRORS
     //////////////////////////////////////////////////////////////*/
@@ -367,6 +378,62 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
         // Invariants: Verify position is closed
         uint256 remainingDebt = IERC20(VARIABLE_DEBT_TOKEN).balanceOf(address(this));
         if (remainingDebt > 0) revert EmergencyDivestFailed();
+    }
+
+    /**
+     * @dev 0 when a deposit could revert with HealthFactorBelowMinimum, see _investmentKeepsMinimum().
+     */
+    function maxDeposit(address receiver) public view override returns (uint256) {
+        if (!_investmentKeepsMinimum()) return 0;
+        return super.maxDeposit(receiver);
+    }
+
+    /**
+     * @dev 0 when a mint could revert with HealthFactorBelowMinimum, see _investmentKeepsMinimum().
+     */
+    function maxMint(address receiver) public view override returns (uint256) {
+        if (!_investmentKeepsMinimum()) return 0;
+        return super.maxMint(receiver);
+    }
+
+    /**
+     * @dev Whether any investment keeps the position at or above minHealthFactor, without simulating it. With one
+     *      collateral and one debt asset the health factor is collateral * LT / debt, so the position after an
+     *      investment is the mediant of the existing position and the invested slice: if both are at or above
+     *      minHealthFactor, so is the result. The existing position is read from Aave (only when it has debt;
+     *      without debt Aave reports type(uint256).max). The slice is built at targetLeverage, so its health factor
+     *      is L * LT / (L - 1) with the live liquidation threshold. Both values are reduced by
+     *      HEALTH_FACTOR_MARGIN_BPS to cover Aave's rounding, so the answer can be false when an investment would
+     *      succeed, never true when it would revert. Slices below MIN_INVEST_ASSETS are not invested and never revert.
+     */
+    function _investmentKeepsMinimum() internal view returns (bool) {
+        uint256 minimum = minHealthFactor;
+
+        // Existing position
+        if (IERC20(VARIABLE_DEBT_TOKEN).balanceOf(address(this)) > 0) {
+            //slither-disable-next-line unused-return
+            (,,,,, uint256 healthFactor) = IPool(AAVE_POOL).getUserAccountData(address(this));
+            if (_applyMargin(healthFactor) < minimum) return false;
+        }
+
+        // New slice at target leverage: L * LT / (L - 1), LT in bps scaled to 1e18
+        uint256 leverage = targetLeverage;
+        uint256 impliedHealthFactor = leverage * _liquidationThreshold() * 1e14 / (leverage - 1);
+        return _applyMargin(impliedHealthFactor) >= minimum;
+    }
+
+    /**
+     * @dev Liquidation threshold in bps that Aave applies to the WETH collateral: the E-Mode category's when one is
+     *      set, otherwise the reserve's (bits 16-31 of its configuration).
+     */
+    function _liquidationThreshold() internal view returns (uint256) {
+        uint8 categoryId = E_MODE_CATEGORY_ID;
+        if (categoryId > 0) return IPool(AAVE_POOL).getEModeCategoryCollateralConfig(categoryId).liquidationThreshold;
+        return (IPool(AAVE_POOL).getConfiguration(asset()) >> 16) & 0xFFFF;
+    }
+
+    function _applyMargin(uint256 healthFactor) internal pure returns (uint256) {
+        return healthFactor * (BPS - HEALTH_FACTOR_MARGIN_BPS) / BPS;
     }
 
     /**

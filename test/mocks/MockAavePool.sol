@@ -23,7 +23,8 @@ contract MockAavePool is IPool {
     address public primaryAsset;
 
     uint256 public constant LTV_BASE = 9300; // 93% LTV for E-Mode
-    uint256 public constant LIQUIDATION_THRESHOLD = 9500; // 95%
+    /// @dev Liquidation threshold in bps (95%), used for E-Mode, the reserve configuration and the health factor.
+    uint256 public liquidationThreshold = 9500;
     uint256 public constant HEALTH_FACTOR_DECIMALS = 1e18;
     uint256 public constant RAY = 1e27;
 
@@ -56,6 +57,10 @@ contract MockAavePool is IPool {
 
     function setNormalizedIncome(uint256 income) external {
         normalizedIncome = income;
+    }
+
+    function setLiquidationThreshold(uint256 threshold) external {
+        liquidationThreshold = threshold;
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -118,7 +123,7 @@ contract MockAavePool is IPool {
     {
         totalCollateralBase = _getTotalCollateral(user);
         totalDebtBase = _getTotalDebt(user);
-        currentLiquidationThreshold = LIQUIDATION_THRESHOLD;
+        currentLiquidationThreshold = liquidationThreshold;
         ltv = LTV_BASE;
 
         if (totalDebtBase == 0) {
@@ -131,10 +136,18 @@ contract MockAavePool is IPool {
         }
     }
 
-    function getEModeCategoryData(uint8) external pure override returns (EModeCategory memory) {
+    function getEModeCategoryCollateralConfig(uint8) external view override returns (CollateralConfig memory) {
+        return CollateralConfig({ltv: uint16(LTV_BASE), liquidationThreshold: uint16(liquidationThreshold), liquidationBonus: 10100});
+    }
+
+    function getConfiguration(address) external view override returns (uint256) {
+        return LTV_BASE | (liquidationThreshold << 16);
+    }
+
+    function getEModeCategoryData(uint8) external view override returns (EModeCategory memory) {
         return EModeCategory({
             ltv: uint16(LTV_BASE),
-            liquidationThreshold: uint16(LIQUIDATION_THRESHOLD),
+            liquidationThreshold: uint16(liquidationThreshold),
             liquidationBonus: 10100,
             priceSource: address(0),
             label: "ETH correlated"

@@ -217,17 +217,24 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
 
     /**
      * @dev The performance fee is assessed before ERC4626 prices the operation, so shares and assets are
-     *      converted at the post-fee share price. Same for mint, withdraw and redeem. Emergency mode and the
-     *      whitelist are checked first so their errors take precedence over ERC4626's maxDeposit/maxMint check.
+     *      converted at the post-fee share price. Same for mint, withdraw and redeem. Every limit that maxDeposit()
+     *      and maxMint() report is enforced where it applies (emergency mode and the whitelist by the modifiers,
+     *      the minimum health factor by the strategy), so the ERC4626 comparison with maxDeposit()/maxMint() is not
+     *      repeated here: it would add the strategy's health factor reads to every deposit and replace
+     *      HealthFactorBelowMinimum with ERC4626ExceededMaxDeposit.
      */
     function deposit(uint256 assets, address receiver) public virtual override nonReentrant whenNotEmergency onlyWhitelisted(receiver) returns (uint256) {
         _assessPerformanceFee();
-        return super.deposit(assets, receiver);
+        uint256 shares = previewDeposit(assets);
+        _deposit(_msgSender(), receiver, assets, shares);
+        return shares;
     }
 
     function mint(uint256 shares, address receiver) public virtual override nonReentrant whenNotEmergency onlyWhitelisted(receiver) returns (uint256) {
         _assessPerformanceFee();
-        return super.mint(shares, receiver);
+        uint256 assets = previewMint(shares);
+        _deposit(_msgSender(), receiver, assets, shares);
+        return assets;
     }
 
     function withdraw(uint256 assets, address receiver, address owner) public virtual override nonReentrant returns (uint256) {
@@ -253,18 +260,18 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
     }
 
     /**
-     * @dev 0 while emergency mode is active or for receivers that are not whitelisted, since deposit() reverts.
+     * @dev 0 when deposit() could revert, see _depositsOpen().
      */
     function maxDeposit(address receiver) public view virtual override returns (uint256) {
-        if (emergencyMode || !isWhitelisted[receiver]) return 0;
+        if (!_depositsOpen(receiver)) return 0;
         return super.maxDeposit(receiver);
     }
 
     /**
-     * @dev 0 while emergency mode is active or for receivers that are not whitelisted, since mint() reverts.
+     * @dev 0 when mint() could revert, see _depositsOpen().
      */
     function maxMint(address receiver) public view virtual override returns (uint256) {
-        if (emergencyMode || !isWhitelisted[receiver]) return 0;
+        if (!_depositsOpen(receiver)) return 0;
         return super.maxMint(receiver);
     }
 
@@ -323,6 +330,17 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
     /*//////////////////////////////////////////////////////////////
                           INTERNAL LOGIC
     //////////////////////////////////////////////////////////////*/
+
+    /**
+     * @dev False during emergency mode, for receivers that are not whitelisted, and when the strategy's maxDeposit()
+     *      for the vault is 0 (for the WETH loop, when an investment could end below minHealthFactor). The strategies
+     *      report either 0 or type(uint256).max, so their limit is used as all-or-nothing.
+     */
+    function _depositsOpen(address receiver) internal view returns (bool) {
+        if (emergencyMode || !isWhitelisted[receiver]) return false;
+        BaseStrategy cachedStrategy = strategy;
+        return address(cachedStrategy) == address(0) || cachedStrategy.maxDeposit(address(this)) > 0;
+    }
 
     /**
      * @dev Uses High Water Mark to prevent double-taxing profits.
