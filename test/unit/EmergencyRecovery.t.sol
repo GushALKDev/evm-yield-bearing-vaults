@@ -145,6 +145,31 @@ abstract contract EmergencyRecoveryTestBase is StrategyTestBase {
         assertApproxEqAbs(IERC20(debtToken).balanceOf(address(strategy)), 2 ether * uint256(TARGET_LEVERAGE - 1), 2, "Deposit borrowed at target leverage");
     }
 
+    /// @notice After exit, a deposit that would open a position below minHealthFactor reverts.
+    function test_DepositAfterExit_RevertsBelowMinHealthFactor() public {
+        // ============ ARRANGE ============
+        (YieldBearingVault vault, WETHLoopStrategy strategy) = _deployWethLoop();
+        _deposit(vault, alice, 1 ether);
+        (,,,,, uint256 healthFactor) = IPool(aavePool).getUserAccountData(address(strategy));
+        vm.startPrank(admin);
+        vault.setEmergencyMode(true);
+        vault.setEmergencyMode(false);
+        // 10x opens at the same health factor as before, which is now below the minimum
+        strategy.setHealthFactors(healthFactor + 0.01e18, healthFactor + 0.02e18);
+        vm.stopPrank();
+
+        _fund(bob, 1 ether);
+        vm.startPrank(bob);
+        weth.approve(address(vault), 1 ether);
+
+        // ============ ACT & ASSERT ============
+        vm.expectPartialRevert(WETHLoopStrategy.HealthFactorBelowMinimum.selector);
+        vault.deposit(1 ether, bob);
+        vm.stopPrank();
+
+        assertEq(IERC20(debtToken).balanceOf(address(strategy)), 0, "No position should be opened");
+    }
+
     function _setPoolManagerBalance(uint256 amount) internal {
         if (_useFork()) {
             deal(address(weth), poolManager, amount);

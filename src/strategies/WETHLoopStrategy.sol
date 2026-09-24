@@ -72,6 +72,7 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
     error InsufficientAaveRepayment(uint256 repaid, uint256 requested);
     error StrategyNotHarvestable();
     error HealthFactorBelowTarget(uint256 healthFactor, uint256 targetHealthFactor);
+    error HealthFactorBelowMinimum(uint256 healthFactor, uint256 minHealthFactor);
 
     /*//////////////////////////////////////////////////////////////
                                CONSTRUCTOR
@@ -146,7 +147,8 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
 
     /**
      * @dev Calculates flash loan amount needed to reach target leverage. Only `assets` is supplied: idle WETH is
-     *      invested by reinvest(), which checks the resulting health factor.
+     *      invested by reinvest(), which checks the resulting health factor. Reverts if the position ends below
+     *      minHealthFactor, so a deposit never opens a position that checkHealth() would close right away.
      */
     function _invest(uint256 assets) internal override {
         uint256 principal = assets;
@@ -163,6 +165,12 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
         } else {
             AaveAdapter.supply(AAVE_POOL, assetAddr, principal);
         }
+
+        // Invariants
+        //slither-disable-next-line unused-return
+        (,,,,, uint256 healthFactor) = IPool(AAVE_POOL).getUserAccountData(address(this));
+        uint256 minimum = minHealthFactor;
+        if (healthFactor < minimum) revert HealthFactorBelowMinimum(healthFactor, minimum);
     }
 
     /**
