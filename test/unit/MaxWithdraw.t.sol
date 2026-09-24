@@ -102,6 +102,19 @@ abstract contract MaxWithdrawTestBase is StrategyTestBase {
         _withdraw(vault, alice, max);
     }
 
+    /// @notice The strategy's own maxRedeem() for the vault is capped by flash liquidity, and redeeming it succeeds.
+    function test_StrategyMaxRedeem_LimitedByFlashLiquidity() public {
+        (YieldBearingVault vault, WETHLoopStrategy strategy) = _deployWethLoop();
+        _deposit(vault, alice, 1 ether);
+        _deposit(vault, bob, 1 ether);
+        _setPoolManagerBalance(2 ether);
+
+        uint256 max = strategy.maxRedeem(address(vault));
+        assertLt(max, strategy.balanceOf(address(vault)), "Flash loan liquidity should cap the limit");
+        vm.prank(address(vault));
+        strategy.redeem(max, address(vault), address(vault));
+    }
+
     function _withdraw(YieldBearingVault vault, address user, uint256 assets) internal {
         vm.prank(user);
         vault.withdraw(assets, user, user);

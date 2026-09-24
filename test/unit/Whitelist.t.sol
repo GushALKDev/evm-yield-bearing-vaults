@@ -6,6 +6,7 @@ import {YieldBearingVault} from "../../src/vaults/YieldBearingVault.sol";
 import {MockStrategy} from "../mocks/MockStrategy.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {VaultDeployer} from "../utils/VaultDeployer.sol";
+import {Whitelist} from "../../src/access/Whitelist.sol";
 
 /**
  * @title MockERC20
@@ -15,6 +16,14 @@ contract MockERC20 is ERC20 {
     constructor() ERC20("Mock Token", "MOCK") {
         _mint(msg.sender, 1_000_000e18);
     }
+}
+
+/**
+ * @title WhitelistHarness
+ * @notice Whitelist without overrides, to test the default removal hook.
+ */
+contract WhitelistHarness is Whitelist {
+    constructor(address _owner) Whitelist(_owner) {}
 }
 
 /**
@@ -390,6 +399,23 @@ contract WhitelistTest is Test {
         // ============ ASSERT ============
         assertEq(vault.balanceOf(charlie), shares / 2, "Charlie should receive shares");
         assertEq(vault.balanceOf(alice), shares / 2, "Alice should retain half");
+    }
+
+    /**
+     * @notice Tests that the default removal hook allows every removal (the vault overrides it for the fee recipient).
+     */
+    function test_BeforeRemoval_DefaultAllowsRemoval() public {
+        // ============ ARRANGE ============
+        WhitelistHarness harness = new WhitelistHarness(owner);
+        vm.startPrank(owner);
+        harness.addToWhitelist(alice);
+
+        // ============ ACT ============
+        harness.removeFromWhitelist(alice);
+        vm.stopPrank();
+
+        // ============ ASSERT ============
+        assertFalse(harness.isWhitelisted(alice), "Alice should be removed");
     }
 
     /*//////////////////////////////////////////////////////////////
