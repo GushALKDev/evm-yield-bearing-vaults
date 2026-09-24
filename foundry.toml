@@ -7,6 +7,12 @@ evm_version = "cancun"
 optimizer = true
 optimizer_runs = 200
 
+# Matches the existing style: function signatures stay on one line up to 160 characters (the longest in src/ is 163);
+# longer ones put each attribute on its own line
+[fmt]
+line_length = 160
+multiline_func_header = "attributes_first"
+
 [rpc_endpoints]
 mainnet = "${ETHEREUM_MAINNET_RPC}"
 

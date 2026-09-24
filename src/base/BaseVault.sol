@@ -28,10 +28,12 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
                                 STORAGE
     //////////////////////////////////////////////////////////////*/
 
+    // forgefmt: disable-start
     // Packed in single slot        // 23 bytes
     BaseStrategy public strategy;   // 20 bytes
     uint16 public protocolFeeBps;   // 2 bytes
     bool public emergencyMode;      // 1 byte
+    // forgefmt: disable-end
 
     address public admin;
     address public feeRecipient;
