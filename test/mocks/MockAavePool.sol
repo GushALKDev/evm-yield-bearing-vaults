@@ -25,6 +25,12 @@ contract MockAavePool is IPool {
     uint256 public constant LTV_BASE = 9300; // 93% LTV for E-Mode
     uint256 public constant LIQUIDATION_THRESHOLD = 9500; // 95%
     uint256 public constant HEALTH_FACTOR_DECIMALS = 1e18;
+    uint256 public constant RAY = 1e27;
+
+    /// @dev Liquidity index reported by getReserveNormalizedIncome(). Supplies that scale to 0 revert, as in Aave.
+    uint256 public normalizedIncome = RAY;
+
+    error InvalidMintAmount();
 
     /*//////////////////////////////////////////////////////////////
                              CONSTRUCTOR
@@ -48,11 +54,16 @@ contract MockAavePool is IPool {
         primaryAsset = asset;
     }
 
+    function setNormalizedIncome(uint256 income) external {
+        normalizedIncome = income;
+    }
+
     /*//////////////////////////////////////////////////////////////
                           POOL FUNCTIONS
     //////////////////////////////////////////////////////////////*/
 
     function supply(address asset, uint256 amount, address onBehalfOf, uint16) public virtual override {
+        if (amount * RAY / normalizedIncome == 0) revert InvalidMintAmount();
         IERC20(asset).transferFrom(msg.sender, address(this), amount);
         aTokens[asset].mint(onBehalfOf, amount);
     }
@@ -86,6 +97,10 @@ contract MockAavePool is IPool {
 
     function setUserEMode(uint8 categoryId) external override {
         userEModes[msg.sender] = categoryId;
+    }
+
+    function getReserveNormalizedIncome(address) external view override returns (uint256) {
+        return normalizedIncome;
     }
 
     function getUserAccountData(address user)

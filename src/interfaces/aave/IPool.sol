@@ -58,4 +58,9 @@ interface IPool {
         );
 
     function getEModeCategoryData(uint8 id) external view returns (EModeCategory memory);
+
+    /**
+     * @return Liquidity index of the reserve (ray, 1e27): supplied amounts are minted as amount / index scaled aTokens.
+     */
+    function getReserveNormalizedIncome(address asset) external view returns (uint256);
 }

@@ -5,6 +5,7 @@ import {BaseStrategy} from "../base/BaseStrategy.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {AaveAdapter} from "../adapters/AaveAdapter.sol";
+import {IPool} from "../interfaces/aave/IPool.sol";
 
 /**
  * @title AaveSimpleLendingStrategy
@@ -22,6 +23,8 @@ contract AaveSimpleLendingStrategy is BaseStrategy {
 
     address public immutable AAVE_POOL;
     address public immutable A_TOKEN;
+
+    uint256 private constant RAY = 1e27;
 
     /*//////////////////////////////////////////////////////////////
                                  ERRORS
@@ -45,8 +48,17 @@ contract AaveSimpleLendingStrategy is BaseStrategy {
                           STRATEGY LOGIC
     //////////////////////////////////////////////////////////////*/
 
+    /**
+     * @dev Amounts that Aave would mint as 0 scaled aTokens (amount / liquidity index, rounded down) revert the
+     *      supply, so they stay idle: counted by totalAssets(), paid out first on withdrawals, invested by reinvest().
+     */
     function _invest(uint256 assets) internal override {
-        AaveAdapter.supply(AAVE_POOL, address(asset()), assets);
+        // Checks
+        address assetAddr = asset();
+        if (assets * RAY / IPool(AAVE_POOL).getReserveNormalizedIncome(assetAddr) == 0) return;
+
+        // Interactions
+        AaveAdapter.supply(AAVE_POOL, assetAddr, assets);
     }
 
     /**

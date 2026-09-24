@@ -6,6 +6,7 @@ import {YieldBearingVault} from "../../src/vaults/YieldBearingVault.sol";
 import {BaseVault} from "../../src/base/BaseVault.sol";
 import {BaseStrategy} from "../../src/base/BaseStrategy.sol";
 import {WETHLoopStrategy} from "../../src/strategies/WETHLoopStrategy.sol";
+import {AaveSimpleLendingStrategy} from "../../src/strategies/AaveSimpleLendingStrategy.sol";
 import {IPool} from "../../src/interfaces/aave/IPool.sol";
 import {StrategyTestBase} from "../utils/StrategyTestBase.sol";
 import {MockAavePool} from "../mocks/MockAavePool.sol";
@@ -208,6 +209,23 @@ abstract contract EmergencyRecoveryTestBase is StrategyTestBase {
         // ============ ASSERT: INVESTED ============
         assertEq(weth.balanceOf(address(strategy)), 0, "Idle WETH should be reinvested");
         assertGt(IERC20(debtToken).balanceOf(address(strategy)), 0, "Position should be opened");
+    }
+
+    /// @notice The Aave simple strategy keeps idle an amount Aave would mint as 0 scaled aTokens instead of reverting.
+    function test_AaveSimple_DustStaysIdle() public {
+        // ============ ARRANGE ============
+        (YieldBearingVault vault, AaveSimpleLendingStrategy strategy) = _deployAaveSimple();
+        // Mock mode: a liquidity index above 1 like the fork's, so 1 wei scales to 0
+        if (!_useFork()) mockPool.setNormalizedIncome(1.05e27);
+
+        // ============ ACT ============
+        _deposit(vault, alice, 1);
+        vm.prank(admin);
+        vault.reinvest();
+
+        // ============ ASSERT ============
+        assertEq(IERC20(aToken).balanceOf(address(strategy)), 0, "Nothing should be supplied");
+        assertEq(weth.balanceOf(address(strategy)), 1, "Dust should stay idle");
     }
 
     function _setPoolManagerBalance(uint256 amount) internal {
