@@ -158,6 +158,82 @@ contract WhitelistTest is Test {
         assertTrue(vault.isWhitelisted(charlie), "Charlie should be whitelisted");
     }
 
+    /**
+     * @notice Tests that addBatchToWhitelist adds every new address and skips the ones already whitelisted.
+     */
+    function test_AddBatchToWhitelist_Success() public {
+        // ============ ARRANGE ============
+        vm.prank(owner);
+        vault.addToWhitelist(alice);
+        address[] memory accounts = _accounts(alice, bob, charlie);
+
+        // ============ ACT ============
+        vm.recordLogs();
+        vm.prank(owner);
+        vault.addBatchToWhitelist(accounts);
+
+        // ============ ASSERT ============
+        assertEq(vm.getRecordedLogs().length, 2, "Only new addresses should emit WhitelistedAdded");
+        assertTrue(vault.isWhitelisted(alice), "Alice should stay whitelisted");
+        assertTrue(vault.isWhitelisted(bob), "Bob should be whitelisted");
+        assertTrue(vault.isWhitelisted(charlie), "Charlie should be whitelisted");
+    }
+
+    /**
+     * @notice Tests that removeBatchFromWhitelist removes every whitelisted address and skips the others.
+     */
+    function test_RemoveBatchFromWhitelist_Success() public {
+        // ============ ARRANGE ============
+        vm.startPrank(owner);
+        vault.addToWhitelist(alice);
+        vault.addToWhitelist(bob);
+        vm.stopPrank();
+        address[] memory accounts = _accounts(alice, bob, charlie);
+
+        // ============ ACT ============
+        vm.recordLogs();
+        vm.prank(owner);
+        vault.removeBatchFromWhitelist(accounts);
+
+        // ============ ASSERT ============
+        assertEq(vm.getRecordedLogs().length, 2, "Only whitelisted addresses should emit WhitelistedRemoved");
+        assertFalse(vault.isWhitelisted(alice), "Alice should be removed");
+        assertFalse(vault.isWhitelisted(bob), "Bob should be removed");
+        assertFalse(vault.isWhitelisted(charlie), "Charlie should stay not whitelisted");
+    }
+
+    /**
+     * @notice Tests that both batch functions reject an empty array.
+     */
+    function test_BatchWhitelist_RevertIfEmpty() public {
+        // ============ ACT & ASSERT ============
+        address[] memory empty = new address[](0);
+
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSignature("EmptyArray()"));
+        vault.addBatchToWhitelist(empty);
+
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSignature("EmptyArray()"));
+        vault.removeBatchFromWhitelist(empty);
+    }
+
+    /**
+     * @notice Tests that only the owner can call the batch functions.
+     */
+    function test_BatchWhitelist_RevertIfNotOwner() public {
+        // ============ ACT & ASSERT ============
+        address[] memory accounts = _accounts(alice, bob, charlie);
+
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", alice));
+        vault.addBatchToWhitelist(accounts);
+
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", alice));
+        vault.removeBatchFromWhitelist(accounts);
+    }
+
     /*//////////////////////////////////////////////////////////////
                        DEPOSIT ENFORCEMENT TESTS
     //////////////////////////////////////////////////////////////*/
@@ -514,6 +590,17 @@ contract WhitelistTest is Test {
         // ============ ASSERT ============
         assertGt(asset.balanceOf(alice), balanceBefore, "Alice should receive assets");
         assertEq(vault.balanceOf(alice), shares / 2, "Alice should have half shares left");
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                            HELPERS
+    //////////////////////////////////////////////////////////////*/
+
+    function _accounts(address a, address b, address c) internal pure returns (address[] memory accounts) {
+        accounts = new address[](3);
+        accounts[0] = a;
+        accounts[1] = b;
+        accounts[2] = c;
     }
 
     /*//////////////////////////////////////////////////////////////
