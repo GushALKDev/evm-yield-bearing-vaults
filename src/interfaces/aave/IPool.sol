@@ -76,6 +76,11 @@ interface IPool {
     function getConfiguration(address asset) external view returns (uint256);
 
     /**
+     * @return Underlying the reserve can pay out (Aave 3.1+ virtual accounting); withdrawals above it revert.
+     */
+    function getVirtualUnderlyingBalance(address asset) external view returns (uint128);
+
+    /**
      * @return Liquidity index of the reserve (ray, 1e27): supplied amounts are minted as amount / index scaled aTokens.
      */
     function getReserveNormalizedIncome(address asset) external view returns (uint256);

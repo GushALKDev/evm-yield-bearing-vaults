@@ -242,14 +242,27 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
         return assets;
     }
 
+    /**
+     * @dev Only the owner's balance is compared here: the liquidity limits that maxWithdraw() reports are enforced by
+     *      the strategy and the external protocols, with their specific errors, and repeating them would read the
+     *      strategy's position on every withdrawal. Same for redeem.
+     */
     function withdraw(uint256 assets, address receiver, address owner) public virtual override nonReentrant returns (uint256) {
         _assessPerformanceFee();
-        return super.withdraw(assets, receiver, owner);
+        uint256 ownerAssets = _convertToAssets(balanceOf(owner), Math.Rounding.Floor);
+        if (assets > ownerAssets) revert ERC4626ExceededMaxWithdraw(owner, assets, ownerAssets);
+        uint256 shares = previewWithdraw(assets);
+        _withdraw(_msgSender(), receiver, owner, assets, shares);
+        return shares;
     }
 
     function redeem(uint256 shares, address receiver, address owner) public virtual override nonReentrant returns (uint256) {
         _assessPerformanceFee();
-        return super.redeem(shares, receiver, owner);
+        uint256 ownerShares = balanceOf(owner);
+        if (shares > ownerShares) revert ERC4626ExceededMaxRedeem(owner, shares, ownerShares);
+        uint256 assets = previewRedeem(shares);
+        _withdraw(_msgSender(), receiver, owner, assets, shares);
+        return assets;
     }
 
     function totalAssets() public view virtual override returns (uint256) {
@@ -262,6 +275,25 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
         }
 
         return localBalance + strategyBalance;
+    }
+
+    /**
+     * @dev Capped by what the vault can pay now: its idle balance plus the strategy's maxWithdraw() for the vault.
+     *      Computed from the owner's balance directly, since OpenZeppelin derives maxWithdraw() from maxRedeem().
+     */
+    function maxWithdraw(address owner) public view virtual override returns (uint256) {
+        return Math.min(_convertToAssets(balanceOf(owner), Math.Rounding.Floor), _withdrawableAssets());
+    }
+
+    /**
+     * @dev All shares when their redemption fits in _withdrawableAssets(); otherwise the shares whose redemption the
+     *      vault can pay now, rounded down so previewRedeem() of the result stays within _withdrawableAssets().
+     */
+    function maxRedeem(address owner) public view virtual override returns (uint256) {
+        uint256 shares = balanceOf(owner);
+        uint256 withdrawable = _withdrawableAssets();
+        if (_convertToAssets(shares, Math.Rounding.Floor) <= withdrawable) return shares;
+        return _convertToShares(withdrawable, Math.Rounding.Floor);
     }
 
     /**
@@ -335,6 +367,17 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
     /*//////////////////////////////////////////////////////////////
                           INTERNAL LOGIC
     //////////////////////////////////////////////////////////////*/
+
+    /**
+     * @dev Idle balance plus what the strategy can pay the vault now. _withdraw() uses the idle balance first and
+     *      withdraws the shortfall from the strategy.
+     */
+    function _withdrawableAssets() internal view returns (uint256) {
+        uint256 idle = IERC20(asset()).balanceOf(address(this));
+        BaseStrategy cachedStrategy = strategy;
+        if (address(cachedStrategy) == address(0)) return idle;
+        return idle + cachedStrategy.maxWithdraw(address(this));
+    }
 
     /**
      * @dev False during emergency mode, for receivers that are not whitelisted, and when the strategy's maxDeposit()

@@ -359,6 +359,41 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
         if (healthFactor < target) revert HealthFactorBelowTarget(healthFactor, target);
     }
 
+    /**
+     * @dev Idle WETH plus the most _divest() can take from the position now, mirroring its two paths:
+     *      - full close (the remaining equity would be below MIN_REMAINING_EQUITY): flash loan of the whole debt, so
+     *        it needs debt <= PoolManager liquidity and equity <= Aave liquidity (the repay adds the debt back);
+     *      - proportional deleverage of n: flash loan of ceil(debt * n / equity) <= PoolManager liquidity, n <= Aave
+     *        liquidity, and n <= equity - MIN_REMAINING_EQUITY.
+     *      Nothing is taken from the position while Aave's reserve is paused, while collateral <= debt
+     *      (InsufficientEquity) or while the health factor is below 1 (Aave rejects the collateral withdrawal).
+     */
+    function _withdrawableAssets() internal view override returns (uint256) {
+        address assetAddr = asset();
+        uint256 idle = IERC20(assetAddr).balanceOf(address(this));
+        uint256 collateral = IERC20(A_TOKEN).balanceOf(address(this));
+        //slither-disable-next-line incorrect-equality
+        if (collateral == 0) return idle;
+
+        uint256 aaveLiquidity = AaveAdapter.withdrawableLiquidity(AAVE_POOL, assetAddr);
+        uint256 debt = IERC20(VARIABLE_DEBT_TOKEN).balanceOf(address(this));
+        //slither-disable-next-line incorrect-equality
+        if (debt == 0) return idle + Math.min(collateral, aaveLiquidity);
+        if (collateral <= debt) return idle;
+
+        //slither-disable-next-line unused-return
+        (,,,,, uint256 healthFactor) = IPool(AAVE_POOL).getUserAccountData(address(this));
+        if (healthFactor < HEALTH_FACTOR_FLOOR) return idle;
+
+        uint256 equity = collateral - debt;
+        uint256 flashLiquidity = IERC20(assetAddr).balanceOf(address(POOL_MANAGER));
+        if (debt <= flashLiquidity && equity <= aaveLiquidity) return idle + equity;
+        if (equity <= MIN_REMAINING_EQUITY) return idle;
+
+        uint256 partialLimit = Math.min(equity - MIN_REMAINING_EQUITY, flashLiquidity * equity / debt);
+        return idle + Math.min(partialLimit, aaveLiquidity);
+    }
+
     function _exitGas() internal pure override returns (uint256) {
         return EXIT_GAS;
     }

@@ -6,6 +6,7 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {BaseVault} from "./BaseVault.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 /**
  * @title BaseStrategy
@@ -141,17 +142,45 @@ abstract contract BaseStrategy is ERC4626 {
     }
 
     /**
-     * @dev Allowed during emergency mode.
+     * @dev Allowed during emergency mode. Only the owner's balance is compared here: the liquidity limits that
+     *      maxWithdraw() reports are enforced by _divest() and the external protocols, with their specific errors.
      */
     function withdraw(uint256 assets, address receiver, address owner) public virtual override onlyVault returns (uint256) {
-        return super.withdraw(assets, receiver, owner);
+        uint256 ownerAssets = _convertToAssets(balanceOf(owner), Math.Rounding.Floor);
+        if (assets > ownerAssets) revert ERC4626ExceededMaxWithdraw(owner, assets, ownerAssets);
+        uint256 shares = previewWithdraw(assets);
+        _withdraw(_msgSender(), receiver, owner, assets, shares);
+        return shares;
     }
 
     /**
-     * @dev Allowed during emergency mode.
+     * @dev Allowed during emergency mode. Same limit handling as withdraw().
      */
     function redeem(uint256 shares, address receiver, address owner) public virtual override onlyVault returns (uint256) {
-        return super.redeem(shares, receiver, owner);
+        uint256 ownerShares = balanceOf(owner);
+        if (shares > ownerShares) revert ERC4626ExceededMaxRedeem(owner, shares, ownerShares);
+        uint256 assets = previewRedeem(shares);
+        _withdraw(_msgSender(), receiver, owner, assets, shares);
+        return assets;
+    }
+
+    /**
+     * @dev Capped by what the strategy can pay now, see _withdrawableAssets(). Computed from the owner's balance
+     *      directly, since OpenZeppelin derives maxWithdraw() from maxRedeem().
+     */
+    function maxWithdraw(address owner) public view virtual override returns (uint256) {
+        return Math.min(_convertToAssets(balanceOf(owner), Math.Rounding.Floor), _withdrawableAssets());
+    }
+
+    /**
+     * @dev All shares when their redemption fits in _withdrawableAssets(); otherwise the shares whose redemption the
+     *      strategy can pay now, rounded down so previewRedeem() of the result stays within _withdrawableAssets().
+     */
+    function maxRedeem(address owner) public view virtual override returns (uint256) {
+        uint256 shares = balanceOf(owner);
+        uint256 withdrawable = _withdrawableAssets();
+        if (_convertToAssets(shares, Math.Rounding.Floor) <= withdrawable) return shares;
+        return _convertToShares(withdrawable, Math.Rounding.Floor);
     }
 
     function _decimalsOffset() internal pure override returns (uint8) {
@@ -250,6 +279,14 @@ abstract contract BaseStrategy is ERC4626 {
      * @dev Closes the external position. Default is a no-op for strategies without one.
      */
     function _exitPosition() internal virtual {}
+
+    /**
+     * @dev Largest amount withdraw() can pay now, all owners together. Default: the idle balance, which is exact for
+     *      strategies without an external position and an underestimate otherwise.
+     */
+    function _withdrawableAssets() internal view virtual returns (uint256) {
+        return IERC20(asset()).balanceOf(address(this));
+    }
 
     /**
      * @dev Gas that exitPosition() must receive. Default 0 for strategies without an external position.

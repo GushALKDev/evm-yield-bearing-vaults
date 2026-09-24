@@ -31,7 +31,11 @@ contract MockAavePool is IPool {
     /// @dev Liquidity index reported by getReserveNormalizedIncome(). Supplies that scale to 0 revert, as in Aave.
     uint256 public normalizedIncome = RAY;
 
+    /// @dev Reserve paused flag, reported at bit 60 of getConfiguration(); supply and withdraw revert while set.
+    bool public reservePaused;
+
     error InvalidMintAmount();
+    error ReservePaused();
 
     /*//////////////////////////////////////////////////////////////
                              CONSTRUCTOR
@@ -59,6 +63,10 @@ contract MockAavePool is IPool {
         normalizedIncome = income;
     }
 
+    function setReservePaused(bool paused) external {
+        reservePaused = paused;
+    }
+
     function setLiquidationThreshold(uint256 threshold) external {
         liquidationThreshold = threshold;
     }
@@ -68,12 +76,14 @@ contract MockAavePool is IPool {
     //////////////////////////////////////////////////////////////*/
 
     function supply(address asset, uint256 amount, address onBehalfOf, uint16) public virtual override {
+        if (reservePaused) revert ReservePaused();
         if (amount * RAY / normalizedIncome == 0) revert InvalidMintAmount();
         IERC20(asset).transferFrom(msg.sender, address(this), amount);
         aTokens[asset].mint(onBehalfOf, amount);
     }
 
     function withdraw(address asset, uint256 amount, address to) external override returns (uint256) {
+        if (reservePaused) revert ReservePaused();
         MockAToken aToken = aTokens[asset];
         uint256 balance = aToken.balanceOf(msg.sender);
         uint256 withdrawAmount = amount > balance ? balance : amount;
@@ -141,7 +151,12 @@ contract MockAavePool is IPool {
     }
 
     function getConfiguration(address) external view override returns (uint256) {
-        return LTV_BASE | (liquidationThreshold << 16);
+        return LTV_BASE | (liquidationThreshold << 16) | (uint256(reservePaused ? 1 : 0) << 60);
+    }
+
+    /// @dev The mock holds the underlying itself, so its balance is what a withdrawal can pay out.
+    function getVirtualUnderlyingBalance(address asset) external view override returns (uint128) {
+        return uint128(IERC20(asset).balanceOf(address(this)));
     }
 
     function getEModeCategoryData(uint8) external view override returns (EModeCategory memory) {

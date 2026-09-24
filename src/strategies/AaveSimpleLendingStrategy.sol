@@ -6,6 +6,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {AaveAdapter} from "../adapters/AaveAdapter.sol";
 import {IPool} from "../interfaces/aave/IPool.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 /**
  * @title AaveSimpleLendingStrategy
@@ -92,6 +93,16 @@ contract AaveSimpleLendingStrategy is BaseStrategy {
         //slither-disable-next-line unused-return
         // Withdrawn amount is the full aToken balance
         AaveAdapter.withdraw(AAVE_POOL, asset(), type(uint256).max);
+    }
+
+    /**
+     * @dev Idle assets plus the supply Aave can pay out now (0 while the reserve is paused).
+     */
+    function _withdrawableAssets() internal view override returns (uint256) {
+        address assetAddr = asset();
+        uint256 idle = IERC20(assetAddr).balanceOf(address(this));
+        uint256 supplied = IERC20(A_TOKEN).balanceOf(address(this));
+        return idle + Math.min(supplied, AaveAdapter.withdrawableLiquidity(AAVE_POOL, assetAddr));
     }
 
     function _exitGas() internal pure override returns (uint256) {
