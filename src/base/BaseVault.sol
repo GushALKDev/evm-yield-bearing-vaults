@@ -347,35 +347,54 @@ abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
      *      Fees are minted as new shares, diluting existing holders.
      */
     function _assessPerformanceFee() internal {
-        uint16 feeBps = protocolFeeBps;
-        address recipient = feeRecipient;
+        (uint256 feeShares, uint256 currentAssets, uint256 profit) = _pendingFee();
+        if (profit == 0) return;
 
-        if (feeBps == 0 || recipient == address(0)) return;
-
-        uint256 currentAssets = totalAssets();
-        uint256 hwm = highWaterMark;
-
-        if (currentAssets > hwm) {
-            // Unchecked safe (already checked currentAssets > hwm)
-            uint256 profit;
-            unchecked {
-                profit = currentAssets - hwm;
-            }
-            uint256 feeInAssets = profit * feeBps / MAX_BPS;
-
-            if (feeInAssets > 0) {
-                // Priced against assets net of the fee, so the minted shares are worth feeInAssets after minting
-                // (convertToShares would price them before the mint dilutes them). Offsets match ERC4626 (+1, +1).
-                uint256 feeShares = Math.mulDiv(feeInAssets, totalSupply() + 1, currentAssets - feeInAssets + 1);
-
-                if (feeShares > 0) {
-                    _mint(recipient, feeShares);
-                    emit PerformanceFeePaid(profit, feeShares);
-                }
-            }
-
-            highWaterMark = currentAssets;
+        if (feeShares > 0) {
+            _mint(feeRecipient, feeShares);
+            emit PerformanceFeePaid(profit, feeShares);
         }
+
+        highWaterMark = currentAssets;
+    }
+
+    /**
+     * @dev What the next _assessPerformanceFee() would do, without state changes: the fee shares it would mint, the
+     *      totalAssets() it would record as the high-water mark and the profit above the mark (all 0 when no fee is
+     *      configured or there is no profit).
+     */
+    function _pendingFee() internal view returns (uint256 feeShares, uint256 currentAssets, uint256 profit) {
+        uint16 feeBps = protocolFeeBps;
+        if (feeBps == 0 || feeRecipient == address(0)) return (0, 0, 0);
+
+        currentAssets = totalAssets();
+        uint256 hwm = highWaterMark;
+        if (currentAssets <= hwm) return (0, currentAssets, 0);
+
+        // Unchecked safe (already checked currentAssets > hwm)
+        unchecked {
+            profit = currentAssets - hwm;
+        }
+        uint256 feeInAssets = profit * feeBps / MAX_BPS;
+
+        // Priced against assets net of the fee, so the minted shares are worth feeInAssets after minting
+        // (convertToShares would price them before the mint dilutes them). Offsets match ERC4626 (+1, +1).
+        if (feeInAssets > 0) feeShares = Math.mulDiv(feeInAssets, totalSupply() + 1, currentAssets - feeInAssets + 1);
+    }
+
+    /**
+     * @dev Conversions count the fee shares that deposit, mint, withdraw and redeem mint before pricing, so
+     *      convertTo*, preview* and max* match those calls exactly. totalAssets() needs no change: the fee is paid in
+     *      shares, not assets.
+     */
+    function _convertToShares(uint256 assets, Math.Rounding rounding) internal view virtual override returns (uint256) {
+        (uint256 feeShares,,) = _pendingFee();
+        return Math.mulDiv(assets, totalSupply() + feeShares + 10 ** _decimalsOffset(), totalAssets() + 1, rounding);
+    }
+
+    function _convertToAssets(uint256 shares, Math.Rounding rounding) internal view virtual override returns (uint256) {
+        (uint256 feeShares,,) = _pendingFee();
+        return Math.mulDiv(shares, totalAssets() + 1, totalSupply() + feeShares + 10 ** _decimalsOffset(), rounding);
     }
 
     /*//////////////////////////////////////////////////////////////
