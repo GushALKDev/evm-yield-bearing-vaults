@@ -774,6 +774,6 @@ forge test --gas-report
 ## Dependencies
 
 - Foundry
-- OpenZeppelin Contracts (master commit `239795b`, package version 5.5.0)
+- OpenZeppelin Contracts v5.7.0 (`cab1993`)
 - Uniswap V4 Core v4.0.0
 - Ethereum mainnet RPC with historical state for fork tests (`ETHEREUM_MAINNET_RPC`)
