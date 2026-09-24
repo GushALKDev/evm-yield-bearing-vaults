@@ -25,7 +25,7 @@ The repository contains no deployment scripts (`script/` is empty) and no `broad
 - **Negative carry.** The WETH loop demonstrates the leverage mechanics. Because collateral and debt are the same asset in the same Aave reserve, the loop has negative carry; a positive spread requires yield-bearing collateral such as an LST (see [Roadmap](#roadmap)). See [Economics of the WETH loop](#economics-of-the-weth-loop).
 - **Emergency mode.** Activating emergency mode, by the admin or by the health check, blocks deposits and attempts to close the external position. If the close fails, emergency mode stays active and withdrawals deleverage proportionally. Strategy accounting counts idle assets, so withdrawals during emergency mode pay the pro rata share of equity.
 - **Health check.** `WETHLoopStrategy.checkHealth()` is a permissionless function. When the Aave health factor is below `minHealthFactor`, it activates emergency mode. It is designed to exit the position before liquidation, but it only runs when someone calls it. The repository does not include a keeper.
-- **Recovery.** When the vault admin deactivates emergency mode, the strategy reinvests its idle balance at the current `targetLeverage`.
+- **Recovery in two steps.** The vault admin first deactivates emergency mode, which only clears the flags, and then calls `vault.reinvest()`, which invests the strategy's idle balance at the current `targetLeverage` and reverts unless the health factor reaches `targetHealthFactor`. The thresholds are asymmetric: the strategy trips below `minHealthFactor` and re-arms only at or above `targetHealthFactor` (`1e18 < minHealthFactor < targetHealthFactor`).
 - **Performance fee with high-water mark.** Performance fees are only charged on gains above the previous high-water mark. The fee is assessed before each deposit, mint, withdraw and redeem is priced, and is minted as vault shares to the fee recipient.
 - **Permissioned ERC-4626.** The vault implements the ERC-4626 interface on top of OpenZeppelin Contracts (master commit `239795b`, package version 5.5.0). It is permissioned: deposit and mint receivers and share transfer recipients must be whitelisted. Withdrawals and redemptions are not whitelist-gated.
 - **Flash loan provider.** Uniswap V4 charged no flash loan fee at the time of writing. Aave V3's flash loan premium was 0.05% at the time of writing (`FLASHLOAN_PREMIUM_TOTAL = 5` bps at block 26043110). Neither value is fixed.
@@ -76,10 +76,10 @@ The repository contains no deployment scripts (`script/` is empty) and no `broad
 
 | Role | Holder | Can call |
 |------|--------|----------|
-| Owner | `Ownable` owner of the vault (constructor `_owner`) | `addToWhitelist`, `removeFromWhitelist`, `addBatchToWhitelist`, `removeBatchFromWhitelist`, `transferOwnership`, `renounceOwnership` |
-| Admin | Vault `admin` (constructor `_admin`) | Vault: `setAdmin`, `setStrategy`, `setEmergencyMode`, `setProtocolFee`, `setFeeRecipient`. Strategy: `setLeverage`, `setHealthFactors`, `harvest` (reverts in both strategies) |
+| Owner | `Ownable` owner of the vault (constructor `_owner`) | `addToWhitelist`, `removeFromWhitelist`, `addBatchToWhitelist`, `removeBatchFromWhitelist`, `transferOwnership`. `renounceOwnership` always reverts |
+| Admin | Vault `admin` (constructor `_admin`) | Vault: `setAdmin`, `setStrategy`, `setEmergencyMode`, `reinvest`, `setProtocolFee`, `setFeeRecipient`. Strategy: `setLeverage`, `setHealthFactors`, `harvest` (reverts in both strategies) |
 | Strategy | The vault's current `strategy` | `activateEmergencyMode()` on the vault (activate only) |
-| Vault | The strategy's immutable `VAULT` | Strategy `deposit`, `mint`, `withdraw`, `redeem`, `setEmergencyMode` |
+| Vault | The strategy's immutable `VAULT` | Strategy `deposit`, `mint`, `withdraw`, `redeem`, `setEmergencyMode`, `reinvest` |
 | Strategy itself | The strategy contract | `exitPosition()` (called from `setEmergencyMode` inside try/catch) |
 | Anyone | Any address | `checkHealth()` on the strategies, `assessPerformanceFee()` on the vault |
 
@@ -90,7 +90,7 @@ The repository contains no deployment scripts (`script/` is empty) and no `broad
 ```
 1. The vault deposits X WETH into the strategy
 2. Strategy flash-borrows X * (L - 1) WETH from the Uniswap V4 PoolManager
-3. Strategy supplies its whole WETH balance (X * L if it held no idle WETH) to Aave
+3. Strategy supplies X * L WETH to Aave; idle WETH already in the strategy is left for reinvest()
 4. Strategy borrows X * (L - 1) WETH from Aave at the variable rate
 5. Strategy repays the flash loan with the borrowed WETH
 6. Result: X * L collateral, X * (L - 1) debt
@@ -131,7 +131,8 @@ If the strategy has no debt it withdraws `N` directly. If collateral is less tha
    and reverts with EmergencyDivestFailed() if any debt remains
 4. On success, the WETH stays in the strategy as idle equity, counted by totalAssets()
 5. On failure, EmergencyExitFailed(reason) is emitted, emergency mode stays active and the position
-   stays open; calling setEmergencyMode(true) or checkHealth() again retries the exit
+   stays open; calling setEmergencyMode(true) again retries the exit, and so does checkHealth()
+   while the health factor is still below minHealthFactor (otherwise it returns true and does nothing)
 6. While emergency mode is active: vault and strategy deposits and mints revert;
    withdrawals pay from idle WETH, or deleverage proportionally if the position is still open
 ```
@@ -140,11 +141,16 @@ If the strategy has no debt it withdraws `N` directly. If collateral is less tha
 
 ```
 1. Admin calls vault.setEmergencyMode(false)
-2. The vault calls strategy.setEmergencyMode(false)
-3. The strategy detects the transition and calls _reinvest() with its whole WETH balance
-4. The position is rebuilt at the current targetLeverage
-5. Deposits are accepted again
+2. The vault clears its flag and calls strategy.setEmergencyMode(false), which clears the strategy flag
+   and does not touch the idle WETH, so this step cannot fail because of the protocols
+3. Deposits are accepted again; each deposit invests only itself at targetLeverage
+4. Admin calls vault.reinvest(), which reverts while emergency mode is active and calls
+   strategy.reinvest(): the whole idle WETH balance is invested at the current targetLeverage
+5. The strategy reads the Aave health factor of the whole position and reverts with
+   HealthFactorBelowTarget unless it is at or above targetHealthFactor
 ```
+
+If step 4 or 5 reverts (for example without flash loan liquidity, or with a `targetHealthFactor` the target leverage cannot reach), emergency mode stays off and the idle WETH stays idle: it counts in `totalAssets()` and pays withdrawals first.
 
 ## Economics of the WETH loop
 
@@ -204,19 +210,21 @@ cast call 0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2 "getReserveData(address)((u
 - **Admin powers.** The admin can:
   - replace the strategy at any time with `setStrategy()`. The new strategy receives an unlimited allowance of the vault asset and all future deposits; funds in the old strategy are not migrated and stop being counted in `totalAssets()`;
   - set the protocol fee (up to 2,500 bps, 25%) and the fee recipient;
-  - activate emergency mode, which closes the external position, or deactivate it, which reinvests the strategy's idle balance at the current leverage;
-  - change `targetLeverage` (any integer >= 2, no upper bound in code) and the health factor thresholds (any `min < target`, no bounds). Raising `minHealthFactor` above the current health factor lets anyone trigger an emergency divest; the tests use this to simulate an unhealthy position;
+  - activate emergency mode, which closes the external position, deactivate it, and reinvest the strategy's idle balance at the current leverage with `reinvest()`;
+  - change `targetLeverage` (any integer >= 2, no upper bound in code) and the health factor thresholds (`1e18 < min < target`, no upper bound). Raising `minHealthFactor` above the current health factor lets anyone trigger an emergency divest; the tests use this to simulate an unhealthy position;
   - transfer the admin role with `setAdmin()`.
+  The admin cannot replace the strategy while emergency mode is active.
   There is no timelock.
-- **Owner powers.** The owner controls the whitelist and can transfer or renounce ownership. Renouncing freezes the whitelist.
+- **Owner powers.** The owner controls the whitelist and can transfer ownership. `renounceOwnership()` always reverts, so the whitelist always has an owner.
 - **Keeper liveness.** `checkHealth()` is permissionless, but the repository does not include a keeper, bot or script that calls it. If nobody calls it in time, the emergency divest does not happen and the position can be liquidated.
 - **Best-effort exit.** The exit runs inside try/catch so that emergency mode can always be activated. A caller of `checkHealth()` can supply just enough gas for the outer call to succeed while the exit runs out of gas; the result is emergency mode with the position still open (deposits blocked, withdrawals deleverage proportionally). Calling `checkHealth()` again retries the exit.
 - **Flash loan liquidity.** Investment, proportional divestment and the emergency exit all flash-borrow WETH from the Uniswap V4 PoolManager. The exit borrows the full debt. At block 26043110 the PoolManager held about 1,004.7 WETH, which at 10x limits a single deposit to about 111.6 WETH and a position the exit can close to about 111.6 WETH of equity. Some older fork tests `deal` 10,000 WETH to the PoolManager; the regression tests, the gas benchmark and `LeverageBoundsForkTest` use its real balance.
 - **Aave parameters.** LTV (93%), liquidation threshold (95%) and E-Mode category 1 parameters are the values at block 26043110. They are set by Aave governance and can change; a lower liquidation threshold lowers the health factor of an existing position immediately.
 - **Negative carry.** The WETH loop loses value over time at typical rates; see [Economics of the WETH loop](#economics-of-the-weth-loop).
-- **No rebalancing.** Leverage is only applied when assets are invested. `setLeverage()` affects future deposits and reinvestments, not the existing position. `targetHealthFactor` is stored and validated but not used by any logic. `harvest()` reverts in both strategies.
-- **Dust exits.** A withdrawal that would leave less than `MIN_REMAINING_EQUITY` (1e12 wei) in the position closes the whole position; the remaining equity stays as idle WETH until the next deposit supplies it again.
-- **ERC-4626 limits.** `maxDeposit()` and `maxMint()` are not overridden and return `type(uint256).max` even for non-whitelisted receivers and during emergency mode.
+- **No rebalancing.** Leverage is only applied when assets are invested. `setLeverage()` affects future deposits and reinvestments, not the existing position. `targetHealthFactor` is only checked by `reinvest()`. `harvest()` reverts in both strategies.
+- **Dust exits.** A withdrawal that would leave less than `MIN_REMAINING_EQUITY` (1e12 wei) in the position closes the whole position; the remaining equity stays as idle WETH until the admin calls `reinvest()`.
+- **ERC-4626 limits.** `maxDeposit()` and `maxMint()` return 0 during emergency mode and for receivers that are not whitelisted, and `type(uint256).max` otherwise. `maxWithdraw()` and `maxRedeem()` are not overridden.
+- **Deposits are not health-checked.** A deposit opens its part of the position at `targetLeverage` without checking the health factor, before and after `reinvest()`. If `minHealthFactor` is above the health factor that `targetLeverage` gives (for example after Aave lowers the liquidation threshold, or after the admin raises `minHealthFactor`), a deposit right after leaving emergency mode opens a position that `checkHealth()` can close again immediately.
 - **Whitelist scope.** The whitelist is checked on the deposit or mint receiver (not the caller) and on the recipient of share transfers. Performance fee shares are minted to the fee recipient without a whitelist check. Addresses removed from the whitelist keep their shares and can still withdraw and transfer to whitelisted addresses.
 - **High-water mark details.** The high-water mark is an aggregate asset amount, not a per-share price. It increases by deposited assets, decreases by withdrawn assets, and is raised to `totalAssets()` when fees are assessed with a non-zero rate and a recipient set. While the fee is 0 or no recipient is set, it is not raised, so enabling the fee later charges it on gains accrued before.
 - **Share inflation.** The vault's 1,000 wei dead shares raise the cost of a first-depositor inflation attack on vault shares; they do not eliminate it, and the vault has no decimals offset. The strategies use a decimals offset of 6: strategy shares are only held by the vault, so the vault's dead shares do not protect strategy share pricing, and counting idle assets would otherwise let a donation to an empty strategy round the vault's strategy shares to zero. With the offset, a 1 WETH donation before a 1 WETH first deposit leaves the depositor at least 99.9999% of the deposit (`test_Donation_BeforeFirstDeposit_DoesNotDiluteDepositor`); rounding a deposit down to zero strategy shares would require a donation of about 1e6 times the deposit.
@@ -250,8 +258,8 @@ Issues found while reviewing the documentation against the code (1 to 4) and whi
 | Strategy share checks | The vault compares the strategy shares minted or burned with `previewDeposit` / `previewWithdraw` and reverts on a worse result |
 | Emergency mode | Blocks vault and strategy deposits and mints and attempts to close the external position; withdrawals pay from idle assets or deleverage proportionally |
 | Health check | Permissionless `checkHealth()`; activates emergency mode when the health factor is below `minHealthFactor`. Designed to exit before liquidation, depends on someone calling it |
-| Recovery | Admin deactivation of emergency mode reinvests the strategy's idle balance |
-| Access control | Owner manages the whitelist; admin manages configuration; the strategy can activate but not deactivate emergency mode; `exitPosition()` only accepts calls from the strategy itself |
+| Recovery | Two steps: admin deactivation only clears the flags; admin `reinvest()` invests the idle balance and requires the health factor to reach `targetHealthFactor` |
+| Access control | Owner manages the whitelist and cannot renounce ownership; admin manages configuration; the strategy can activate but not deactivate emergency mode; `exitPosition()` only accepts calls from the strategy itself |
 | Performance fee | Assessed before each deposit, mint, withdraw and redeem is priced; charged only on gains above the high-water mark; capped at 25% by `MAX_PROTOCOL_FEE_BPS` |
 | Rounding | Proportional deleverage rounds debt repayment up; withdrawals that would leave dust close the position |
 
@@ -457,7 +465,7 @@ Mock mode uses `MockAavePool`, `MockPoolManager` and `MockWETH`, whose gas costs
 - [x] Performance fee with high-water mark
 - [x] Emergency mode circuit breaker with position exit
 - [x] Permissionless health check with emergency divest
-- [x] Automatic reinvestment on emergency recovery
+- [x] Two-step emergency recovery with a `targetHealthFactor` check on reinvestment
 - [x] Fixes for the review findings (see [Review notes](#review-notes))
 - [x] Test suite (247 tests, 91.53% line coverage)
 - [x] Stateless fuzzing (43 tests, 11,008 runs)

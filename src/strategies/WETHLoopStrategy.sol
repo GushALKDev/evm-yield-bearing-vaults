@@ -287,7 +287,8 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
      * @notice Checks strategy health and triggers an emergency divest if needed.
      * @dev If healthFactor < minHealthFactor, activates emergency mode on the vault. The vault propagates it to
      *      this strategy, whose setEmergencyMode() closes the position (see BaseStrategy). If the position is
-     *      still open because an earlier exit failed, calling this again retries the exit.
+     *      still open because an earlier exit failed, calling this again retries the exit only while the health
+     *      factor is still below minHealthFactor; otherwise it returns true and the admin retries it instead.
      * @return healthy True if health factor is acceptable, false otherwise.
      */
     function checkHealth() external override returns (bool healthy) {
