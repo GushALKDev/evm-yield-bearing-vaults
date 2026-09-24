@@ -23,6 +23,7 @@ abstract contract MaxDepositHealthTestBase is StrategyTestBase {
         assertEq(vault.maxDeposit(alice), type(uint256).max, "Vault maxDeposit should be unlimited");
         assertEq(vault.maxMint(alice), type(uint256).max, "Vault maxMint should be unlimited");
         assertEq(strategy.maxDeposit(address(vault)), type(uint256).max, "Strategy maxDeposit should be unlimited");
+        assertEq(strategy.maxMint(address(vault)), type(uint256).max, "Strategy maxMint should be unlimited");
         _deposit(vault, bob, 1 ether);
     }
 

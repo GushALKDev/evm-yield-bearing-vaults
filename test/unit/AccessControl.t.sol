@@ -126,6 +126,26 @@ contract AccessControlTest is Test {
     }
 
     /**
+     * @notice Tests that vault can successfully call strategy.mint().
+     */
+    function test_Strategy_Mint_SuccessFromVault() public {
+        // ============ ARRANGE ============
+        vm.prank(owner);
+        asset.transfer(address(vault), DEPOSIT_AMOUNT);
+        uint256 shares = strategy.previewDeposit(DEPOSIT_AMOUNT);
+
+        // ============ ACT ============
+        vm.startPrank(address(vault));
+        asset.approve(address(strategy), DEPOSIT_AMOUNT);
+        uint256 assets = strategy.mint(shares, address(vault));
+        vm.stopPrank();
+
+        // ============ ASSERT ============
+        assertEq(strategy.balanceOf(address(vault)), shares, "Vault should receive the minted shares");
+        assertLe(assets, DEPOSIT_AMOUNT, "Mint should not charge more than the deposit it mirrors");
+    }
+
+    /**
      * @notice Tests that only vault can call strategy.withdraw().
      */
     function test_Strategy_Withdraw_RevertIfNotVault() public {
