@@ -318,6 +318,49 @@ contract WhitelistTest is Test {
     }
 
     /*//////////////////////////////////////////////////////////////
+                       OWNERSHIP TESTS
+    //////////////////////////////////////////////////////////////*/
+
+    /**
+     * @notice Tests that the owner cannot renounce ownership.
+     */
+    function test_RenounceOwnership_RevertForOwner() public {
+        // ============ ACT & ASSERT ============
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSignature("RenounceOwnershipDisabled()"));
+        vault.renounceOwnership();
+
+        assertEq(vault.owner(), owner, "Owner should not change");
+    }
+
+    /**
+     * @notice Tests that renounceOwnership also reverts for any other caller.
+     */
+    function test_RenounceOwnership_RevertForNonOwner() public {
+        // ============ ACT & ASSERT ============
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSignature("RenounceOwnershipDisabled()"));
+        vault.renounceOwnership();
+
+        assertEq(vault.owner(), owner, "Owner should not change");
+    }
+
+    /**
+     * @notice Tests that ownership can still be transferred, so the whitelist keeps an owner.
+     */
+    function test_TransferOwnership_StillWorks() public {
+        // ============ ACT ============
+        vm.prank(owner);
+        vault.transferOwnership(bob);
+
+        // ============ ASSERT ============
+        assertEq(vault.owner(), bob, "Ownership should transfer");
+        vm.prank(bob);
+        vault.addToWhitelist(charlie);
+        assertTrue(vault.isWhitelisted(charlie), "New owner should manage the whitelist");
+    }
+
+    /*//////////////////////////////////////////////////////////////
                        WITHDRAWAL TESTS
     //////////////////////////////////////////////////////////////*/
 

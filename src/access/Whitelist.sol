@@ -15,6 +15,7 @@ abstract contract Whitelist is Ownable {
 
     error NotWhitelisted(address account);
     error EmptyArray();
+    error RenounceOwnershipDisabled();
 
     /*//////////////////////////////////////////////////////////////
                                  EVENTS
@@ -66,6 +67,13 @@ abstract contract Whitelist is Ownable {
         if (!isWhitelisted[account]) return;
         isWhitelisted[account] = false;
         emit WhitelistedRemoved(account);
+    }
+
+    /**
+     * @dev Disabled: without an owner the whitelist could never change again.
+     */
+    function renounceOwnership() public pure override {
+        revert RenounceOwnershipDisabled();
     }
 
     /// @notice Amortizes fixed tx costs (~23k per address) across batch
