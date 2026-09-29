@@ -10,7 +10,6 @@ artifacts/
 /broadcast/**/dry-run/
 
 # Docs
-docs/
 github-description.md
 
 # Dotenv file

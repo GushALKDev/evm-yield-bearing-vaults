@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  foundry:
+    name: Format, build and tests without an RPC
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          # Same version as the local toolchain used for the figures in the README
+          version: v1.7.1
+
+      - name: Show versions
+        run: forge --version
+
+      - name: Check formatting
+        run: forge fmt --check
+
+      - name: Build
+        run: forge build
+
+      # The fork suites need an Ethereum mainnet archive RPC, so CI runs every test that does not
+      - name: Tests without an RPC
+        run: forge test --no-match-path "test/{integration/*,fuzz/*StrategyFuzz.t.sol,gas/GasBenchmarkFork.t.sol}"

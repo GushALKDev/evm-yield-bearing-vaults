@@ -2,7 +2,7 @@
 
 ## Overview
 
-The suite is organized into unit tests (mocked dependencies), integration tests (mainnet fork), stateless fuzz tests, stateful invariant tests with the handler pattern and a gas benchmark. Results below were obtained on commit `9f599c4` (the last commit that changes code or tests) with Forge 1.7.1; fork suites run against Ethereum mainnet at block 26043110. See the [main README](../README.md) for the project status, trust assumptions and review notes.
+The suite is organized into unit tests (mocked dependencies), integration tests (mainnet fork), stateless fuzz tests, stateful invariant tests with the handler pattern and a gas benchmark. Results below were obtained on commit `9f599c4` (the last commit that changes code or tests) with Forge 1.7.1; fork suites run against Ethereum mainnet at block 26043110. See the [main README](../README.md) for the project overview, [Guide 3](../docs/03-security.md) for the trust assumptions and [Guide 4](../docs/04-review-notes.md) for the review notes.
 
 ## Test Statistics
 
@@ -716,7 +716,20 @@ forge test --match-contract GasBenchmarkMockTest --gas-report
 forge test --match-contract GasBenchmarkForkTest --gas-report
 ```
 
-The measured values are in the main README.
+### Measured costs
+
+Measured at commit `9f599c4` with the two commands above; `setUp` uses `minHealthFactor` 1.02 and E-Mode 1. Values are the gas reported by `--gas-report`, which runs each call as a separate transaction. The fork column runs against Aave V3 and the Uniswap V4 PoolManager at block 26043110 with the PoolManager's real WETH balance.
+
+| Function | Scenario | Mock mode | Mainnet fork |
+|----------|----------|-----------|--------------|
+| `vault.deposit` | 1 WETH into an existing 10x position | 276,259 | 418,232 |
+| `vault.withdraw` | 0.5 WETH from a 1 WETH position | 261,080 | 396,253 |
+| `vault.redeem` | All shares of the only depositor (position closed) | 253,586 | 357,515 |
+| `strategy.checkHealth` | Emergency divest of 10 WETH collateral / 9 WETH debt | 218,663 | 345,280 |
+| `vault.setEmergencyMode(false)` | Recovery step 1, clears the flags | 34,519 | 34,519 |
+| `vault.reinvest` | Recovery step 2: moves the vault's 1,000 wei into the strategy, reinvests about 1 WETH at 10x and checks the health factor | 258,984 | 396,262 |
+
+Mock mode uses `MockAavePool`, `MockPoolManager` and `MockWETH`, whose gas costs are not representative of the real protocols.
 
 ## Running Tests
 
