@@ -26,15 +26,18 @@ import {IAaveV3Testnet, IAaveScaledBalanceToken, IAaveOracle} from "./interfaces
  *      and the PoolManager's WETH leave room for the seed. Forge then simulates the whole broadcast block, so the seed
  *      deposit goes through the real code path (vault, strategy, flash loan, Aave supply and borrow, health factor
  *      check) before any transaction leaves. After the broadcast block, still in simulation only, a smoke test drives
- *      the deployment the way the demo app does and reverts its own state changes. On a real broadcast the run writes
- *      the deployment file the app reads; a dry run leaves it alone.
+ *      the deployment the way the demo app does and reverts its own state changes. With --broadcast the run writes the
+ *      deployment file the app reads; a dry run leaves it alone. Forge writes it while it runs the script, before it sends
+ *      the transactions, so after a broadcast that fails part way the file names contracts that were not deployed: check
+ *      that the vault has code (cast code) before committing the file.
  *
  *      Nothing in the run carries a price with a short staleness window, so there is no separate time-sensitive script.
  *
  *      Usage (Base Sepolia):
  *        forge script script/testnet/DeployTestnet.s.sol --rpc-url https://sepolia.base.org \
  *          --account <keystore> --broadcast
- *      Optional env: SEED_ASSETS (wei, default 0.1 WETH), DEPLOYMENT_FILE, and on chains other than Base Sepolia and
+ *      Optional env: SEED_ASSETS (wei, default 0.1 WETH), DEPLOYMENT_FILE (a path inside app/src/config/deployments, the
+ *      only directory foundry.toml lets scripts write), and on chains other than Base Sepolia and
  *      its local fork (31337): WETH, AAVE_POOL, A_TOKEN, VARIABLE_DEBT_TOKEN, AAVE_ORACLE, POOL_MANAGER.
  */
 contract DeployTestnet is Script {
@@ -191,7 +194,7 @@ contract DeployTestnet is Script {
 
         _smokeTest(w, vault, strategy, operator);
 
-        // Only on a real broadcast: a dry run must not overwrite the file with addresses never deployed
+        // Only with --broadcast: a dry run must not overwrite the file with addresses never deployed
         if (vm.isContext(VmSafe.ForgeContext.ScriptBroadcast)) _writeDeployment(w);
 
         console2.log("Vault:", address(vault));
@@ -284,6 +287,8 @@ contract DeployTestnet is Script {
             if (headroom < debtNeeded) revert BorrowCapHeadroomTooLow(headroom, debtNeeded);
         }
 
+        // Approximate: Aave also counts the treasury's accrual against the supply cap; the simulated seed deposit runs
+        // Aave's exact check before anything is sent
         uint256 supplyCap = ((config >> 116) & ((1 << 36) - 1)) * unit;
         if (supplyCap > 0) {
             uint256 supplied = IAaveScaledBalanceToken(w.aToken).totalSupply();

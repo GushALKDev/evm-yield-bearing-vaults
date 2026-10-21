@@ -313,11 +313,14 @@ describe.skipIf(!rpc)('parity with the contracts on a local Base Sepolia fork', 
   })
 
   it("finds the largest deposit Aave's caps accept, to the wei", async () => {
+    // The room depends on the fork block's live testnet state, so alice wraps whatever the boundary needs
+    const first = await readState()
+    const needed = depositRoom(first.state, first.block.timestamp + 60n) + E18
+    if (first.account.weth < needed) await wrapAndApprove(alice, needed - first.account.weth)
     const { state, block } = await readState()
     const at = block.timestamp + 5n
     const room = depositRoom(state, at)
     expect(room).toBeGreaterThan(10n ** 12n)
-    expect(room).toBeLessThan(30n * E18)
 
     const snap = (await rpcCall('evm_snapshot')) as Hex
     const over = await send(alice, { address: d.vault, abi: vaultAbi, functionName: 'deposit', args: [room + 1n, alice] }, { at, gas: 3_000_000n, mayRevert: true })

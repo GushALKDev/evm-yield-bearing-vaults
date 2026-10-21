@@ -276,8 +276,9 @@ contract DeployTestnetTest is Test {
     }
 
     /// @dev The exit runs inside try/catch, so gas starvation could leave emergency on with the position open. The
-    ///      strategy refuses activation unless exitPosition() gets EXIT_GAS; this checks that EXIT_GAS covers the exit
-    ///      on Base Sepolia's Aave 3.6 and that a starved call reverts instead of tripping half way.
+    ///      strategy refuses activation unless exitPosition() gets EXIT_GAS; this checks that a starved call reverts
+    ///      instead of tripping half way, and that the whole trip, measured with the touched contracts cooled to cold
+    ///      storage, fits in EXIT_GAS on Base Sepolia's Aave 3.6.
     function test_checkHealth_exitFitsInExitGasOnBaseSepolia() public {
         (YieldBearingVault vault, WETHLoopStrategy strategy, DemoOperator operator) = _deploy();
         _appDeposit(vault, operator, 1 ether);
@@ -287,13 +288,18 @@ contract DeployTestnetTest is Test {
         strategy.checkHealth{gas: 400_000}();
         assertFalse(vault.emergencyMode(), "a starved call changes nothing");
 
+        // Cold storage, as in a fresh transaction (EXIT_GAS is sized for it)
+        address[7] memory touched = [address(strategy), address(vault), w.aavePool, w.aToken, w.variableDebtToken, w.weth, w.poolManager];
+        for (uint256 i; i < touched.length; i++) {
+            vm.cool(touched[i]);
+        }
         uint256 gasBefore = gasleft();
         strategy.checkHealth();
         uint256 used = gasBefore - gasleft();
         assertTrue(vault.emergencyMode(), "tripped");
         assertEq(_debt(address(strategy)), 0, "closed");
         assertLt(used, strategy.EXIT_GAS(), "the whole trip costs less than the exit budget");
-        emit log_named_uint("checkHealth trip gas on Base Sepolia (warm fork)", used);
+        emit log_named_uint("checkHealth trip gas on Base Sepolia (cooled storage)", used);
     }
 
     /*//////////////////////////////////////////////////////////////

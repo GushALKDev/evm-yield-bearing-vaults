@@ -75,10 +75,11 @@ jobs:
         run: npm test
 
       # One step, so the anvil fork lives through the tests. It is started here with its output detached: a background
-      # process that keeps the step's output open can keep the step from finishing.
+      # process that keeps the step's output open can keep the step from finishing. The fork is pinned to the block the
+      # testnet tooling tests use, so live testnet activity (caps, PoolManager balance) cannot turn CI red.
       - name: Parity with the contracts on a Base Sepolia fork
         run: |
-          anvil --silent --chain-id 31337 --fork-url "$BASE_SEPOLIA_RPC_URL" > /dev/null 2>&1 &
+          anvil --silent --chain-id 31337 --fork-url "$BASE_SEPOLIA_RPC_URL" --fork-block-number 48476000 > /dev/null 2>&1 &
           for _ in $(seq 1 100); do cast chain-id >/dev/null 2>&1 && break; sleep 0.2; done
           ./scripts/local-chain.sh
           LOCAL_RPC=http://127.0.0.1:8545 npx vitest run scripts

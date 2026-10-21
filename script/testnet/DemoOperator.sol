@@ -16,8 +16,8 @@ import {IPool} from "../../src/interfaces/aave/IPool.sol";
  *      - shock(): raises minHealthFactor above the strategy's live health factor (and targetHealthFactor above that),
  *        which is how the test suite simulates an unhealthy position. It changes nothing else: the position is closed
  *        only when someone calls the strategy's permissionless checkHealth(). At most once per SHOCK_COOLDOWN, only
- *        while the strategy has debt and emergency mode is off. Until checkHealth() or restore() runs, deposits revert
- *        with HealthFactorBelowMinimum.
+ *        while the strategy has debt and emergency mode is off. Until checkHealth() or restore() runs, deposits that reach
+ *        Aave (MIN_INVEST_ASSETS and above) revert with HealthFactorBelowMinimum.
  *      - restore(): clears emergency mode and puts both health factor thresholds back to their deployment values.
  *        Open to anyone at any time, so a shock keeps deposits closed only until someone calls it.
  *      - reinvest(): the vault's reinvest(), which the strategy reverts unless the position ends at or above

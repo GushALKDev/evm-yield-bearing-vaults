@@ -84,13 +84,16 @@ LOCAL_RPC=http://127.0.0.1:8545 npx vitest run scripts      # parity with the co
 E2E_RPC=http://127.0.0.1:8545 npx playwright test           # end to end, with wagmi's mock connector
 ```
 
-The parity suite checks every value the app mirrors against the contracts and Aave on the fork, to the wei: balances and
+The parity suite checks the values the app mirrors against the contracts and Aave on the fork, to the wei: balances and
 the health factor projected up to 30 days ahead, every conversion, preview and ERC-4626 limit with a pending fee, the
 position each deposit, withdrawal, redeem, emergency exit and reinvest leaves (scaled balances, indexes, treasury
 accrual), and the largest deposit Aave's caps accept (one wei more reverts). Its gas test estimates each call right
 after another account touched Aave's WETH reserve in the same block, which makes Aave's state update a no-op in the
 estimate, and lands it one block later with the app's margin. The end-to-end suite drives every action and failure
-path in a browser. Both snapshot the fork and revert it when they finish.
+path in a browser. Both snapshot the fork and revert it when they finish. Some branches are covered by the unit tests
+only (a full close by withdrawal, which the locked seed keeps out of reach on this deployment; Aave's reserve flags;
+liquidity limits), and conditions Aave can change on its own (an E-Mode reconfiguration, its LTV check) are left to the
+simulation against the chain before each signature.
 
 ## Gas
 
@@ -124,9 +127,16 @@ The script checks the dependencies first (code at every address, the aToken and 
 reserve flags, E-Mode category 1, and room for the seed under both caps and in the PoolManager), and forge simulates the
 whole run, seed deposit included, before anything is sent. It deploys the vault, the strategy and DemoOperator, sets the
 10% fee, deposits the seed on behalf of DemoOperator (which cannot withdraw it) and hands DemoOperator the owner and
-admin roles. A smoke test then drives the deployment the way the app does, in simulation only. On a broadcast it writes
-`app/src/config/deployments/84532.json`, which the app reads: commit that file. A run without `--broadcast` leaves it
-alone. Nothing in the run carries a time-sensitive price, so there is no second script.
+admin roles. A smoke test then drives the deployment the way the app does, in simulation only. With `--broadcast` it
+writes `app/src/config/deployments/84532.json`, which the app reads; a run without it leaves the file alone. Forge
+writes the file while it runs the script, before it sends the transactions, so check that the broadcast went through
+before committing it:
+
+```bash
+cast code $(jq -r .vault app/src/config/deployments/84532.json) --rpc-url https://sepolia.base.org   # not 0x
+```
+
+Nothing in the run carries a time-sensitive price, so there is no second script.
 
 To verify the contracts on BaseScan, add `--verify --etherscan-api-key <key>` (an Etherscan API V2 key covers
 BaseScan).
