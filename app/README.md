@@ -50,7 +50,15 @@ can hand both roles to other addresses with `handBack()`, which ends the public 
 
 Aave's caps and the PoolManager's WETH are shared with every user of the testnet. At the block the fork tests pin
 (48,476,000) the WETH borrow cap had 107.45 WETH of room, enough for about 11.9 WETH of deposits at 10x; other users
-move that figure, and a deposit beyond it reverts in Aave with a decoded message.
+move that figure, and a deposit beyond it reverts in Aave with a decoded message. The room is the cap (bits 80 to 115
+of the reserve configuration, 1,200 WETH) minus the variable debt (1,092.55 WETH):
+
+```bash
+cast call 0x8bAB6d1b75f19e9eD9fCe8b9BD338844fF79aE27 "getConfiguration(address)(uint256)" \
+  0x4200000000000000000000000000000000000006 --block 48476000 --rpc-url https://sepolia.base.org
+cast call 0x562abf6562d6A2b165aDa02b5946bc3E7b4dD653 "totalSupply()(uint256)" \
+  --block 48476000 --rpc-url https://sepolia.base.org
+```
 
 ## Run it locally
 

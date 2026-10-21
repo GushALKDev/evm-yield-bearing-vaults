@@ -3,8 +3,9 @@ dist/
 .env
 .env.*
 !.env.example
-# Local chain deployments (anvil fork) are not committed
+# Local chain deployments (anvil fork) are not committed, nor the file the local-chain.sh test writes
 src/config/deployments/31337.json
+src/config/deployments/local-chain-test.json
 test-results/
 playwright-report/
 *.tsbuildinfo
