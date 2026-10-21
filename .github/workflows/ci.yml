@@ -6,7 +6,7 @@ on:
 
 jobs:
   foundry:
-    name: Format, build and tests without an RPC
+    name: Format, build and tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout with submodules
@@ -32,3 +32,56 @@ jobs:
       # The fork suites need an Ethereum mainnet archive RPC, so CI runs every test that does not
       - name: Tests without an RPC
         run: forge test --no-match-path "test/{integration/*,fuzz/*StrategyFuzz.t.sol,gas/GasBenchmarkFork.t.sol}"
+
+      # Testnet tooling (script/testnet): mock unit tests and Base Sepolia fork tests at a pinned block. The public
+      # Base Sepolia RPC serves history; a BASE_SEPOLIA_RPC_URL secret replaces it if it rate limits.
+      - name: Testnet tooling tests
+        env:
+          BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL || 'https://sepolia.base.org' }}
+        run: FOUNDRY_PROFILE=testnet forge test
+
+  app:
+    name: App
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    env:
+      BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL || 'https://sepolia.base.org' }}
+    steps:
+      - name: Checkout with submodules
+        uses: actions/checkout@v4
+        with:
+          # The parity step deploys the contracts to a local fork
+          submodules: recursive
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          # Same version as the local toolchain used for the figures in the README
+          version: v1.7.1
+
+      - name: Install
+        run: npm ci --no-audit --no-fund
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      # One step, so the anvil fork lives through the tests. It is started here with its output detached: a background
+      # process that keeps the step's output open can keep the step from finishing.
+      - name: Parity with the contracts on a Base Sepolia fork
+        run: |
+          anvil --silent --chain-id 31337 --fork-url "$BASE_SEPOLIA_RPC_URL" > /dev/null 2>&1 &
+          for _ in $(seq 1 100); do cast chain-id >/dev/null 2>&1 && break; sleep 0.2; done
+          ./scripts/local-chain.sh
+          LOCAL_RPC=http://127.0.0.1:8545 npx vitest run scripts
+
+      - name: Build
+        run: npm run build

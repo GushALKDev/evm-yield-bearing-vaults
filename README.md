@@ -7,7 +7,7 @@
 
 A modular ERC-4626 vault with pluggable strategies. The repository contains a simple Aave V3 supply strategy and a leveraged WETH loop strategy that uses Uniswap V4 flash loans and Aave V3 E-Mode.
 
-> **Proof of concept. Not audited and not deployed.** The repository has no deployment scripts. Do not use this code with real funds.
+> **Proof of concept. Not audited, and not deployed on any mainnet.** The only deployment tooling targets a testnet (`script/testnet/`). Do not use this code with real funds.
 
 ---
 
@@ -19,6 +19,14 @@ A modular ERC-4626 vault with pluggable strategies. The repository contains a si
 - **ERC-4626 limits that match the code.** `maxDeposit` and `maxMint` return 0 during emergency mode, for receivers outside the whitelist and when an investment would end below the minimum health factor; `maxWithdraw` and `maxRedeem` are capped by the flash loan and Aave liquidity available now. Previews and conversions include the pending performance fee.
 - **High-water mark fee.** Performance fees are charged only on gains above the previous high-water mark, assessed before each deposit, mint, withdraw and redeem is priced, and minted as shares to a whitelisted recipient.
 - **Tested against mainnet.** Fork suites run against Aave V3 and Uniswap V4 at a pinned block, next to 27 stateful invariants. A review of the docs, tests and code found 18 issues, each fixed with a regression test that failed before the fix.
+
+---
+
+## Demo app
+
+A web app (`app/`) runs the vault on Base Sepolia against the real Aave V3 pool, Uniswap V4 PoolManager and WETH of that testnet, with the test suite's parameters. Visitors can deposit testnet WETH, watch the loop as Aave holds it (collateral and idle WETH against debt and equity, projected to the second, with the health factor against its thresholds), withdraw, and run the emergency cycle themselves: a testnet-only contract, `DemoOperator`, holds the owner and admin roles and lets anyone join the whitelist, shock the thresholds above the live health factor, restore and reinvest. Every preview is mirrored from the contracts and Aave with their rounding and checked against a Base Sepolia fork to the wei. How it is built, what the stand-in does and does not check, and how to deploy it: [app/README.md](./app/README.md).
+
+<!-- Live demo: https://vaults-poc.<your-subdomain>.workers.dev -->
 
 ---
 
@@ -94,6 +102,18 @@ The full list, with the permissioned whitelist, dust handling, the exit gas boun
 
 ---
 
+## Repository layout
+
+```
+src/              protocol contracts (vaults, strategies, adapters, access)
+test/             protocol tests: unit, fork integration, fuzz, invariants, gas benchmarks
+script/testnet/   Base Sepolia deployment (DeployTestnet), the testnet-only DemoOperator, their tests
+app/              demo app (React, viem, wagmi), its parity and end-to-end suites
+docs/             guides: architecture, economics, security, review notes
+```
+
+---
+
 ## Testing
 
 Measured at commit `9f599c4` with Forge 1.7.1; fork suites run against Ethereum mainnet at block 26043110.
@@ -141,6 +161,12 @@ INVARIANT_USE_FORK=true FOUNDRY_PROFILE=fork-invariant forge test --match-path "
 
 `FORK_BLOCK` overrides the pinned block (`FORK_BLOCK=0` forks the latest one); results at other blocks can differ from the figures above.
 
+The testnet tooling has its own suite, kept out of the figures above; its fork tests read Base Sepolia (`BASE_SEPOLIA_RPC_URL`, default `https://sepolia.base.org`):
+
+```bash
+FOUNDRY_PROFILE=testnet forge test
+```
+
 ---
 
 ## Roadmap
@@ -158,6 +184,7 @@ INVARIANT_USE_FORK=true FOUNDRY_PROFILE=fork-invariant forge test --match-path "
 - [x] Stateless fuzzing (53 tests, 13,568 runs)
 - [x] Stateful fuzzing (27 invariant functions, 345,600 handler calls)
 - [x] Gas benchmark harness (mock and fork)
+- [x] Base Sepolia demo app and testnet tooling (2026-10-22)
 - [ ] Keeper for `checkHealth()`
 - [ ] Loop strategies with yield-bearing collateral (stETH, rETH, cbETH)
 - [ ] Multi-asset vaults
@@ -173,6 +200,7 @@ INVARIANT_USE_FORK=true FOUNDRY_PROFILE=fork-invariant forge test --match-path "
 | [3. Security](./docs/03-security.md) | Trust assumptions and limitations, security considerations |
 | [4. Review Notes](./docs/04-review-notes.md) | The 18 review findings, root causes, fixes and regression tests |
 | [Test suite](./test/README.md) | Every test file, coverage, fuzzing, invariants, gas benchmarks |
+| [Demo app](./app/README.md) | The Base Sepolia app, the testnet stand-in, deployment and hosting |
 
 ---
 
