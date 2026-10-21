@@ -6,6 +6,8 @@ solc_version = "0.8.26"
 evm_version = "cancun"
 optimizer = true
 optimizer_runs = 200
+# Read-write access to the deployment files the testnet script writes for the demo app (script/testnet)
+fs_permissions = [{ access = "read-write", path = "./app/src/config/deployments" }]
 
 # Matches the existing style: function signatures stay on one line up to 160 characters (the longest in src/ is 163);
 # longer ones put each attribute on its own line
@@ -38,3 +40,9 @@ runs = 20
 depth = 10
 fail_on_revert = false
 shrink_run_limit = 1000
+
+# Testnet tooling (script/testnet): its own suite, so the protocol test figures stay unchanged.
+# Its fork tests read Base Sepolia (BASE_SEPOLIA_RPC_URL, default https://sepolia.base.org).
+# Usage: FOUNDRY_PROFILE=testnet forge test
+[profile.testnet]
+test = "script/testnet/test"
