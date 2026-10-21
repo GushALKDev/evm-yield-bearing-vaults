@@ -649,6 +649,8 @@ select {
 
 .action {
   display: grid;
+  /* minmax(0, 1fr): an auto column would take the amount input's intrinsic width as its minimum */
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
   margin-top: 16px;
 }
@@ -710,6 +712,7 @@ select {
 
 .amount-input {
   flex: 1;
+  width: 0;
   min-width: 0;
   border: 0;
   outline: 0;

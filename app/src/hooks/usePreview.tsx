@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from 'react'
 import type { Position } from '../lib/vault'
 
 /** The position a typed action would leave, so the loop drawing can outline it next to the live one. */
@@ -7,20 +7,37 @@ export interface Preview {
   after: Position
 }
 
-const PreviewContext = createContext<{ preview: Preview | null; setPreview: (p: Preview | null) => void } | null>(null)
+// The value and the setter live in separate contexts: a component that publishes a preview must not re-render when
+// the preview changes, or publishing from an effect loops (each render builds a new position object).
+const PreviewValue = createContext<Preview | null>(null)
+const PreviewSetter = createContext<((p: Preview | null) => void) | null>(null)
+
+const keyOf = (p: Preview | null) =>
+  p ? `${p.label}|${p.after.collateral}|${p.after.debt}|${p.after.idle}|${p.after.healthFactor}` : ''
 
 export function PreviewProvider({ children }: { children: ReactNode }) {
   const [preview, setPreview] = useState<Preview | null>(null)
-  const value = useMemo(() => ({ preview, setPreview }), [preview])
-  return <PreviewContext.Provider value={value}>{children}</PreviewContext.Provider>
+  const last = useRef('')
+  // Publishes only when the previewed position changes, compared by value
+  const publish = useCallback((p: Preview | null) => {
+    const key = keyOf(p)
+    if (key === last.current) return
+    last.current = key
+    setPreview(p)
+  }, [])
+  return (
+    <PreviewSetter.Provider value={publish}>
+      <PreviewValue.Provider value={preview}>{children}</PreviewValue.Provider>
+    </PreviewSetter.Provider>
+  )
 }
 
 export function usePreview(): Preview | null {
-  return useContext(PreviewContext)?.preview ?? null
+  return useContext(PreviewValue)
 }
 
 export function useSetPreview(): (p: Preview | null) => void {
-  const ctx = useContext(PreviewContext)
-  if (!ctx) throw new Error('useSetPreview outside PreviewProvider')
-  return ctx.setPreview
+  const set = useContext(PreviewSetter)
+  if (!set) throw new Error('useSetPreview outside PreviewProvider')
+  return set
 }

@@ -429,7 +429,7 @@ function Actions({ model, acc }: { model: VaultModel; acc: AccountView }) {
         ) : null}
 
         <button className="btn btn-primary btn-block" disabled={!canSubmit} onClick={submit}>
-          {busy ?? (needsApproval ? `Approve and ${plan.verb.toLowerCase()}` : plan.verb)}
+          {busy ?? (needsApproval ? `Approve and ${plan.verb.charAt(0).toLowerCase()}${plan.verb.slice(1)}` : plan.verb)}
         </button>
         {needsApproval && canSubmit ? <p className="hint">Two transactions: an approval for this amount, then the deposit itself.</p> : null}
       </div>

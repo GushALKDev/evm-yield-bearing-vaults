@@ -137,7 +137,11 @@ function useSteps(model: VaultModel): Step[] {
       title: 'Reinvest',
       body: 'The second step, kept separate on purpose: loops the idle WETH at the target leverage again and reverts unless the rebuilt position reaches the re-arm threshold.',
       preview: emergency ? 'Waits for restore: reinvest() reverts during emergency mode.' : (reinvestError ?? reinvestPreview),
-      disabled: !ownsRoles ? noRoles : emergency ? 'Restore first: reinvest() reverts during emergency mode.' : reinvestError,
+      disabled: !ownsRoles
+        ? noRoles
+        : emergency
+          ? 'Restore first: reinvest() reverts during emergency mode.'
+          : (reinvestError ?? (idle < st.minInvestAssets ? 'Nothing idle to loop right now.' : undefined)),
       state: state(4),
       label: 'Reinvest',
       done: 'Reinvested',
