@@ -212,7 +212,8 @@ export function Hero({ model }: { model: VaultModel }) {
         </div>
         {model.live.vault.emergency ? (
           <div className="callout" data-tone="warn" style={{ marginTop: 22 }}>
-            The vault is in emergency mode: deposits are closed and withdrawals are paid from idle WETH. Anyone can restore it and
+            The vault is in emergency mode: deposits are closed, and withdrawals are paid from idle WETH (or deleverage the
+            position if the exit failed). Anyone can restore it and
             reinvest from the <Link href="/emergency">Emergency</Link> page.
           </div>
         ) : null}

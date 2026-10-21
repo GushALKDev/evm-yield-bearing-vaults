@@ -198,8 +198,9 @@ function StatusCard({ model }: { model: VaultModel }) {
         </div>
       </dl>
       <p className="hint" style={{ marginTop: 10 }}>
-        Withdrawals stay open in every state. During emergency mode they are paid from the idle WETH the exit left; if the exit
-        failed and the position is still open, they deleverage it proportionally.
+        The contracts never close withdrawals: during emergency mode they are paid from the idle WETH the exit left, or
+        deleverage the position proportionally if the exit failed. What can still limit them is liquidity (Aave's and the
+        PoolManager's), a paused reserve or a health factor below 1, which maxWithdraw() reports.
       </p>
     </div>
   )
@@ -226,8 +227,9 @@ export function Emergency({ model, onConnect }: { model: VaultModel; onConnect: 
         <div className="section-head">
           <h2>Exit before liquidation, and back</h2>
           <p>
-            The strategy closes its own position when Aave's health factor falls below a threshold, before Aave could liquidate it,
-            and re-arms in two separate steps. On this testnet anyone can run the whole cycle on the shared vault: it moves every
+            Once Aave's health factor falls below a threshold, anyone can make the strategy close its own position, before Aave
+            could liquidate it, by calling checkHealth(); the repository ships no keeper that calls it. Re-arming takes two
+            separate steps. On this testnet anyone can run the whole cycle on the shared vault: it moves every
             depositor's position into idle WETH and back, without losing their equity beyond rounding.
           </p>
         </div>
@@ -252,7 +254,7 @@ export function Emergency({ model, onConnect }: { model: VaultModel; onConnect: 
                       {connected ? (
                         <button
                           className={s.state === 'next' ? 'btn btn-primary' : 'btn'}
-                          disabled={!!s.disabled || !!busy}
+                          disabled={!!s.disabled || !!busy || !model.chainKnown}
                           onClick={() => run(s.label, s.done, s.run)}
                         >
                           {busy === s.label ? 'Working…' : s.label}

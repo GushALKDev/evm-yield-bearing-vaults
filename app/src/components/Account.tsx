@@ -4,9 +4,10 @@ import { chain, links } from '../config/chain'
 import { useSetPreview } from '../hooks/usePreview'
 import { useTx, type ContractCall } from '../hooks/useTx'
 import { operatorAbi, vaultCallAbi, wethAbi } from '../lib/abi'
-import { formatHealth, formatPct, formatWeth, parseAmount, toInput } from '../lib/format'
+import { formatBps, formatHealth, formatPct, formatWeth, parseAmount, toInput } from '../lib/format'
 import type { AccountView, VaultModel } from '../lib/model'
 import {
+  depositClosedReason,
   position,
   previewRedeem,
   simulateDeposit,
@@ -120,6 +121,14 @@ function revertMessage(err: unknown, model: VaultModel): string {
       return `The loop needs a ${formatWeth(x)} WETH flash loan; the PoolManager holds ${formatWeth(y)}.`
     case 'AaveLiquidity':
       return `Aave can pay out ${formatWeth(y)} WETH right now, less than the ${formatWeth(x)} this needs.`
+    case 'ReserveFrozen':
+      return 'Aave has frozen the WETH reserve: no new supply or borrows until it is unfrozen. Withdrawals still work.'
+    case 'ReservePaused':
+      return 'Aave has paused the WETH reserve: nothing moves in or out until it is unpaused.'
+    case 'ReserveInactive':
+      return 'The WETH reserve is inactive on Aave.'
+    case 'BorrowingNotEnabled':
+      return 'Borrowing WETH is disabled on Aave right now, so the loop cannot be built.'
     case 'ERC4626ExceededMaxWithdraw':
       return `More than the ${formatWeth(y, 6)} WETH your shares are worth.`
     case 'VaultInEmergency':
@@ -146,10 +155,22 @@ function positionRows(before: Position, after: Position): Row[] {
 }
 
 function depositBlocked(model: VaultModel, acc: AccountView): string | undefined {
-  if (acc.maxDeposit > 0n) return undefined
-  if (model.live.vault.emergency) return 'Deposits are closed while the vault is in emergency mode. Anyone can restore it on the Emergency page.'
-  if (!acc.data.whitelisted) return 'Join the whitelist first, from the button above.'
-  return 'Deposits are closed: the health factor is below the trip threshold, so an investment could revert. Anyone can call checkHealth() or restore on the Emergency page.'
+  switch (depositClosedReason(model.state, acc.data.whitelisted, model.chainTime)) {
+    case null:
+      return undefined
+    case 'emergency':
+      return 'Deposits are closed while the vault is in emergency mode. Anyone can restore it on the Emergency page.'
+    case 'whitelist':
+      return 'Join the whitelist first, from the button above.'
+    case 'strategy':
+      return 'The strategy is in emergency mode. Anyone can restore it on the Emergency page.'
+    case 'belowTrip':
+      return 'Deposits are closed: the health factor is below the trip threshold, so an investment would revert. Anyone can call checkHealth() on the Emergency page, or restore the thresholds if a shock raised them.'
+    case 'margin':
+      return `Deposits are closed: the health factor sits within ${formatBps(model.state.strategy.params.marginBps)} of the trip threshold, where maxDeposit() reports 0 to cover Aave's rounding, although checkHealth() would not trip yet. The emergency cycle (shock, checkHealth, restore, reinvest) rebuilds the position at the re-arm threshold.`
+    case 'slice':
+      return 'Deposits are closed: a slice at the target leverage would start below the trip threshold.'
+  }
 }
 
 function useActionPlan(model: VaultModel, acc: AccountView, tab: Tab, amount: bigint | null, usedMax: boolean, unwrap: boolean, account: `0x${string}`): Plan {
@@ -297,7 +318,7 @@ function Actions({ model, acc }: { model: VaultModel; acc: AccountView }) {
   const noGas = acc.data.eth === 0n
   const hasAmount = (!!amount && amount > 0n) || (tab === 'withdraw' && usedMax && acc.maxRedeem > 0n)
   const needsApproval = !!plan.approve && !!amount && plan.approve.current < plan.approve.needed
-  const canSubmit = hasAmount && !plan.blocked && !plan.error && !busy && !noGas
+  const canSubmit = hasAmount && !plan.blocked && !plan.error && !busy && !noGas && model.chainKnown
 
   const previewAfter = hasAmount && !plan.blocked && !plan.error ? plan.after : undefined
   const previewLabel = tab === 'deposit' ? 'this deposit' : 'this withdrawal'

@@ -47,6 +47,8 @@ export interface VaultModel {
   /** Visitor's clock (balances tick with it) and the latest block's timestamp (limits and previews use it) */
   now: bigint
   chainTime: bigint
+  /** The latest block has been read; until then chainTime is the visitor's clock and actions wait */
+  chainKnown: boolean
   position: Position
   positionAtChain: Position
   strategyEquity: bigint
@@ -117,6 +119,7 @@ export function buildModel(
   account: AccountData | undefined,
   now: bigint,
   chainTime: bigint,
+  chainKnown = true,
 ): VaultModel {
   const state = buildState(st, live)
   const pos = position(state, now)
@@ -158,6 +161,7 @@ export function buildModel(
     state,
     now,
     chainTime,
+    chainKnown,
     position: pos,
     positionAtChain: posAtChain,
     strategyEquity: equity,
@@ -179,6 +183,19 @@ export function buildModel(
       shocked,
     },
     account: accountView,
+  }
+}
+
+/**
+ * The two timestamps the model uses: the visitor's clock for balances that tick, and the latest block's timestamp for
+ * limits and previews. Neither goes behind Aave's last update.
+ */
+export function pickTimes(now: bigint, chainTime: bigint | undefined, lastUpdate: bigint): { now: bigint; chainTime: bigint; chainKnown: boolean } {
+  return {
+    now: now > lastUpdate ? now : lastUpdate,
+    // Until the latest block arrives, the visitor's clock: Aave's last update can be hours old
+    chainTime: (chainTime ?? now) > lastUpdate ? (chainTime ?? now) : lastUpdate,
+    chainKnown: chainTime !== undefined,
   }
 }
 

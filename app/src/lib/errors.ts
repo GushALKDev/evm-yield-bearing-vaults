@@ -123,6 +123,9 @@ export function describeError(err: unknown): string {
     case 'ManagerLocked':
     case 'AlreadyUnlocked':
       return 'The Uniswap V4 PoolManager rejected the flash loan.'
+
+    case 'Panic':
+      return `The call hit an arithmetic check (panic 0x${(a[0] as bigint).toString(16)}). In this vault that usually means Aave's reserve can no longer pay out that much WETH, which has moved since the preview: check the reserve card and try a smaller amount.`
   }
 
   if (reverted) return `The transaction would revert${name ? ` (${name})` : ''}.`

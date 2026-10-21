@@ -1,6 +1,6 @@
 import type { Address } from 'viem'
 
-// Deployment files are written by script/testnet/DeployTestnet.s.sol, one per chain id, only on a real broadcast.
+// Deployment files are written by script/testnet/DeployTestnet.s.sol, one per chain id, only on a run with --broadcast.
 interface RawDeployment {
   chainId: number
   deployBlock: number

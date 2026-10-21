@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useBlock, useConnection } from 'wagmi'
-import { buildModel, type VaultModel } from '../lib/model'
+import { buildModel, pickTimes, type VaultModel } from '../lib/model'
 import { useVaultData } from './useVaultData'
 
 /** Wall-clock seconds, ticking once a second so projected balances move with Aave's interest. */
@@ -22,11 +22,8 @@ export function useModel(): { model: VaultModel | null; error: Error | null; isL
   const chainTime = block.data?.timestamp
   const model = useMemo(() => {
     if (!data.static || !data.live) return null
-    const last = data.live.reserve.lastUpdateTimestamp
-    // Never project behind Aave's last update if the visitor's clock or the block read runs behind it
-    const t = now > last ? now : last
-    const c = chainTime && chainTime > last ? chainTime : last
-    return buildModel(data.deployment, data.static, data.live, data.account, t, c)
+    const times = pickTimes(now, chainTime, data.live.reserve.lastUpdateTimestamp)
+    return buildModel(data.deployment, data.static, data.live, data.account, times.now, times.chainTime, times.chainKnown)
   }, [data.deployment, data.static, data.live, data.account, now, chainTime])
   return { model, error: (data.error as Error | null) ?? null, isLoading: data.isLoading }
 }

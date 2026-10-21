@@ -15,6 +15,7 @@ import {
 } from './aave'
 import { formatGap, formatHealth, formatWeth, parseAmount, toInput } from './format'
 import {
+  depositClosedReason,
   depositRoom,
   maxDeposit,
   maxWithdraw,
@@ -174,6 +175,68 @@ describe('vault and strategy simulations', () => {
     expect(room).toBe((10n * E18) / 9n)
     expect(() => simulateDeposit(s, room + 1n, true, 1_000n)).toThrow('BorrowCapExceeded')
     expect(() => simulateDeposit(s, room, true, 1_000n)).not.toThrow()
+  })
+})
+
+describe('branches the parity suite cannot reach on the deployment', () => {
+  it('closes the whole position when a withdrawal would leave less than MIN_REMAINING_EQUITY', () => {
+    const s = simulateDeposit(emptyState(), E18, true, 1_000n).state
+    // Leave 1e12 - 1 wei of equity in the strategy: the vault's 1,000 idle wei pay first
+    const assets = E18 + 1000n - (10n ** 12n - 1n)
+    const w = simulateWithdraw(s, assets, s.vault.totalSupply - 1000n, 1_000n)
+    expect(w.fullClose).toBe(true)
+    expect(w.debtRepaid).toBe(9n * E18)
+    expect(w.collateralWithdrawn).toBe(10n * E18)
+    expect(position(w.state, 1_000n).debt).toBe(0n)
+    expect(w.state.strategy.idle).toBe(10n ** 12n - 1n)
+  })
+
+  it('caps withdrawals by what Aave can pay out and deposits by the PoolManager', () => {
+    const s = simulateDeposit(emptyState(), E18, true, 1_000n).state
+    const shares = s.vault.totalSupply - 1000n
+    // Aave can pay 0.5 WETH: a proportional deleverage of n needs n of Aave's liquidity, so the limit is 0.5 plus idle
+    const tight = { ...s, reserve: { ...s.reserve, virtualBalance: E18 / 2n } }
+    expect(maxWithdraw(tight, shares, 1_000n)).toBe(E18 / 2n + 1000n)
+    expect(() => simulateWithdraw(tight, E18 / 2n + 2000n, shares, 1_000n)).toThrow('AaveLiquidity')
+    const dry = { ...emptyState(), flashLiquidity: 8n * E18 }
+    expect(() => simulateDeposit(dry, E18, true, 1_000n)).toThrow('FlashLiquidity')
+  })
+})
+
+describe('review regressions', () => {
+  // F2: the previews ignored Aave's reserve flags, so a frozen or paused reserve still previewed a successful loop
+  it("refuses what Aave's reserve flags refuse", () => {
+    const frozen = emptyState({ configuration: CONFIG | (1n << 57n) })
+    expect(() => simulateDeposit(frozen, E18, true, 1_000n)).toThrow('ReserveFrozen')
+    const paused = emptyState({ configuration: CONFIG | (1n << 60n) })
+    expect(() => simulateDeposit(paused, E18, true, 1_000n)).toThrow('ReservePaused')
+    const noBorrow = emptyState({ configuration: CONFIG & ~(1n << 58n) })
+    expect(() => simulateDeposit(noBorrow, E18, true, 1_000n)).toThrow('BorrowingNotEnabled')
+    const inactive = emptyState({ configuration: CONFIG & ~(1n << 56n) })
+    expect(() => simulateDeposit(inactive, E18, true, 1_000n)).toThrow('ReserveInactive')
+    // A withdrawal from a paused reserve: Aave rejects the repay and the withdrawal outright
+    const s = simulateDeposit(emptyState(), E18, true, 1_000n).state
+    s.reserve = { ...s.reserve, configuration: CONFIG | (1n << 60n) }
+    expect(() => simulateWithdraw(s, E18 / 2n, s.vault.totalSupply - 1000n, 1_000n)).toThrow('ReservePaused')
+  })
+
+  // F5: maxDeposit() is 0 within HEALTH_FACTOR_MARGIN_BPS of the trip threshold too, where checkHealth() does nothing
+  it('tells the margin band apart from a position below the trip threshold', () => {
+    const s = simulateDeposit(emptyState(), E18, true, 1_000n).state
+    const hf = position(s, 1_000n).healthFactor
+    const inBand = { ...s, strategy: { ...s.strategy, params: { ...s.strategy.params, minHealthFactor: (hf * 9995n) / 10_000n } } }
+    expect(depositClosedReason(inBand, true, 1_000n)).toBe('margin')
+    const below = { ...s, strategy: { ...s.strategy, params: { ...s.strategy.params, minHealthFactor: hf + 1n, targetHealthFactor: hf + 2n } } }
+    expect(depositClosedReason(below, true, 1_000n)).toBe('belowTrip')
+    // No position, and a trip threshold above what a slice at target leverage reaches
+    const e = emptyState()
+    const slice = { ...e, strategy: { ...e.strategy, params: { ...e.strategy.params, minHealthFactor: (106n * E18) / 100n, targetHealthFactor: (107n * E18) / 100n } } }
+    expect(depositClosedReason(slice, true, 1_000n)).toBe('slice')
+  })
+
+  // F7: Aave tests the debt in base currency, so a zero oracle price reads as no debt; the mirror divided by zero
+  it('reads a zero oracle price as Aave does, without throwing', () => {
+    expect(healthFactor(E18, E18, 0n, 9500n)).toBe(MAX_UINT256)
   })
 })
 

@@ -249,6 +249,27 @@ export function maxDeposit(s: State, receiverWhitelisted: boolean, now: bigint):
 }
 
 /**
+ * Why maxDeposit() reports 0, for the message the app shows. 'margin' is the band within HEALTH_FACTOR_MARGIN_BPS above
+ * the trip threshold: deposits are closed there although checkHealth() does not trip yet. 'slice' is a position that a
+ * slice at target leverage could not keep above the threshold.
+ */
+export type DepositClosed = 'emergency' | 'whitelist' | 'strategy' | 'belowTrip' | 'margin' | 'slice'
+
+export function depositClosedReason(s: State, receiverWhitelisted: boolean, now: bigint): DepositClosed | null {
+  if (maxDeposit(s, receiverWhitelisted, now) > 0n) return null
+  if (s.vault.emergency) return 'emergency'
+  if (!receiverWhitelisted) return 'whitelist'
+  if (s.strategy.emergency) return 'strategy'
+  const params = s.strategy.params
+  if (s.strategy.debtScaled > 0n) {
+    const hf = position(s, now).healthFactor
+    if (hf < params.minHealthFactor) return 'belowTrip'
+    if (applyMargin(hf, params.marginBps) < params.minHealthFactor) return 'margin'
+  }
+  return 'slice'
+}
+
+/**
  * Largest deposit whose loop fits Aave's supply and borrow caps and the PoolManager's WETH at `now`. Not a contract
  * limit (maxDeposit() does not model caps or flash liquidity): the app uses it to warn before a deposit would revert
  * inside Aave or Uniswap.
@@ -300,10 +321,27 @@ function touchReserve(s: State, now: bigint, aDelta: bigint, debtDelta: bigint):
   return { ...r, scaledATokenSupply: r.scaledATokenSupply + aDelta, scaledDebtSupply: r.scaledDebtSupply + debtDelta }
 }
 
+/** ValidationLogic.validateSupply and validateBorrow: the reserve flags, in Aave's order. */
+function assertInvestable(s: State) {
+  const c = readConfiguration(s.reserve.configuration)
+  if (!c.active) throw new SimulatedRevert('ReserveInactive')
+  if (c.paused) throw new SimulatedRevert('ReservePaused')
+  if (c.frozen) throw new SimulatedRevert('ReserveFrozen')
+  if (!c.borrowingEnabled) throw new SimulatedRevert('BorrowingNotEnabled')
+}
+
+/** ValidationLogic.validateWithdraw and validateRepay: a frozen reserve still lets both through, a paused one does not. */
+function assertWithdrawable(s: State) {
+  const c = readConfiguration(s.reserve.configuration)
+  if (!c.active) throw new SimulatedRevert('ReserveInactive')
+  if (c.paused) throw new SimulatedRevert('ReservePaused')
+}
+
 /** WETHLoopStrategy._invest(assets), the assets already in the strategy's idle balance. */
 function invest(s: State, assets: bigint, now: bigint): State {
   const params = s.strategy.params
   if (assets < params.minInvestAssets) return s
+  assertInvestable(s)
   const l = params.targetLeverage
   const flash = assets * (l - 1n)
   const supply = assets * l
@@ -367,6 +405,7 @@ function divest(s: State, assets: bigint, now: bigint): DivestResult {
   const needed = assets - s.strategy.idle
   const p = position(s, now)
   if (p.collateral === 0n) return none
+  assertWithdrawable(s)
   const u = updatedReserve(s.reserve, now)
   const next = clone(s)
   if (p.debt === 0n) {
@@ -460,6 +499,7 @@ export function simulateExit(s: State, now: bigint): DivestResult {
   const p = position(s, now)
   const none = { state: s, debtRepaid: 0n, collateralWithdrawn: 0n, flashLoan: 0n, fullClose: true }
   if (p.collateral === 0n) return none
+  assertWithdrawable(s)
   const u = updatedReserve(s.reserve, now)
   const next = clone(s)
   if (p.debt === 0n) {

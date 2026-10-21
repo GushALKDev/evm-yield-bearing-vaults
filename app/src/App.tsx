@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { AccountCard } from './components/Account'
 import { Emergency } from './components/Emergency'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { FaucetDialog } from './components/FaucetDialog'
 import { Hero } from './components/Hero'
 import { AaveCard, FeeCard } from './components/MarketCards'
@@ -83,9 +84,11 @@ function Vault() {
 
 export function App() {
   return deployment ? (
-    <PreviewProvider>
-      <Vault />
-    </PreviewProvider>
+    <ErrorBoundary>
+      <PreviewProvider>
+        <Vault />
+      </PreviewProvider>
+    </ErrorBoundary>
   ) : (
     <NotDeployed />
   )

@@ -135,12 +135,13 @@ export const debtBurnScaled = (amount: bigint, borrowIndex: bigint) => rayDivFlo
 /**
  * Health factor of an account whose only collateral and only debt are the same 18-decimal asset, valued at `price`
  * (8 decimals, from Aave's oracle) with liquidation threshold `lt` in bps (the E-Mode category's). Collateral counts
- * only while the scaled aToken balance is non-zero; no debt is type(uint256).max, as Aave reports it.
+ * only while the scaled aToken balance is non-zero; no debt in base currency is type(uint256).max, as Aave reports it.
  */
 export function healthFactor(collateral: bigint, debt: bigint, price: bigint, lt: bigint, unit = WAD): bigint {
-  if (debt === 0n) return MAX_UINT256
-  const collateralBase = (collateral * price) / unit
+  // Aave tests the debt in base currency, so a zero price reads as no debt too
   const debtBase = mulDivCeil(debt, price, unit)
+  if (debtBase === 0n) return MAX_UINT256
+  const collateralBase = (collateral * price) / unit
   return wadDiv(collateralBase * lt, debtBase) / PERCENTAGE_FACTOR
 }
 
