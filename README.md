@@ -124,7 +124,7 @@ Measured at commit `9f599c4` with Forge 1.7.1; fork suites run against Ethereum 
 
 | Area | Result |
 |------|--------|
-| Tests | 365 passing: 197 unit, 88 fork integration, 53 stateless fuzz (22 mock, 31 fork), 27 invariants; plus 10 gas benchmarks |
+| Tests | 367 passing: 199 unit, 88 fork integration, 53 stateless fuzz (22 mock, 31 fork), 27 invariants; plus 10 gas benchmarks |
 | Fuzzing | 13,568 stateless runs and 345,600 invariant handler calls |
 | Coverage | 98.60% lines, 94.00% statements, 74.11% branches, 100% functions |
 | Review | 18 issues found and fixed, each with a regression test that failed against the code without its fix |
@@ -184,7 +184,7 @@ FOUNDRY_PROFILE=testnet forge test
 - [x] Permissionless health check with emergency divest
 - [x] Two-step emergency recovery with a `targetHealthFactor` check on reinvestment
 - [x] Fixes for the review findings (see [Guide 4: Review Notes](./docs/04-review-notes.md))
-- [x] Test suite (365 tests plus 10 gas benchmarks, 98.60% line coverage)
+- [x] Test suite (367 tests plus 10 gas benchmarks, 98.60% line coverage)
 - [x] Stateless fuzzing (53 tests, 13,568 runs)
 - [x] Stateful fuzzing (27 invariant functions, 345,600 handler calls)
 - [x] Gas benchmark harness (mock and fork)

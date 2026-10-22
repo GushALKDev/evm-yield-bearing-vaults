@@ -8,14 +8,14 @@ The suite is organized into unit tests (mocked dependencies), integration tests 
 
 | Category | Location | Tests | Needs `ETHEREUM_MAINNET_RPC` |
 |----------|----------|-------|------------------------------|
-| Unit | `unit/` | 197 | No |
+| Unit | `unit/` | 199 | No |
 | Integration | `integration/` | 88 | Yes |
 | Stateless fuzzing | `fuzz/` | 53 (22 mock, 31 fork) | For `WETHLoopStrategyFuzz`, `AaveSimpleStrategyFuzz`, `MaxDepositStrategyFuzz` and `MaxWithdrawStrategyFuzz` |
 | Stateful fuzzing (invariants) | `invariant/` | 27 | No in mock mode (default) |
-| **Correctness tests** | | **365, all passing** | |
+| **Correctness tests** | | **367, all passing** | |
 | Gas benchmarks | `gas/` | 10 (5 mock, 5 fork) | For `GasBenchmarkForkTest` |
 
-`forge test` reports 375: 365 correctness tests plus 10 gas benchmarks.
+`forge test` reports 377: 367 correctness tests plus 10 gas benchmarks.
 
 Iterations:
 
@@ -23,7 +23,7 @@ Iterations:
 - Stateful: 27 invariant functions x 256 runs x 50 depth = 345,600 handler calls (`[invariant]` in `foundry.toml`). Forge reports `runs: 256, calls: 12800` for each invariant function.
 - Total: 359,168 fuzz runs and handler calls.
 
-Mock mode (no RPC) runs 246 correctness tests (197 unit, 22 fuzz, 27 invariants) plus 5 gas benchmarks, 251 in total:
+Mock mode (no RPC) runs 248 correctness tests (199 unit, 22 fuzz, 27 invariants) plus 5 gas benchmarks, 253 in total:
 
 ```bash
 forge test --no-match-path "test/{integration/*,fuzz/*StrategyFuzz.t.sol,gas/GasBenchmarkFork.t.sol}"
@@ -43,7 +43,7 @@ Without `ETHEREUM_MAINNET_RPC`, plain `forge test` fails in `setUp()` for the fo
 
 ## Code Coverage
 
-`forge coverage --no-match-coverage "(test|script|mock)"`, all 375 tests (correctness tests and gas benchmarks):
+`forge coverage --no-match-coverage "(test|script|mock)"`, all 377 tests (correctness tests and gas benchmarks):
 
 | File | Lines | Statements | Branches | Functions |
 |------|-------|------------|----------|-----------|
@@ -66,7 +66,7 @@ Main gaps:
 
 ```
 test/
-├── unit/                                   # Unit tests (197 tests)
+├── unit/                                   # Unit tests (199 tests)
 │   ├── BaseVault.t.sol                    # 28 tests - Vault admin functions and ERC-4626 limits
 │   ├── Whitelist.t.sol                    # 27 tests - Whitelist enforcement and ownership
 │   ├── AccessControl.t.sol                # 28 tests - Access control modifiers
@@ -75,6 +75,7 @@ test/
 │   ├── Adapters.t.sol                     #  9 tests - AaveAdapter and UniswapV4Adapter through harnesses
 │   ├── Reentrancy.t.sol                   #  6 tests - Reentrant calls through a callback token
 │   ├── PerformanceFeeTiming.t.sol         #  2 tests - Review finding 5
+│   ├── DonationHighWaterMark.t.sol        #  2 tests - Donation report in issue #1, not reproducible
 │   ├── EmergencyAccounting.t.sol          #  6 tests - Review finding 1 (mock)
 │   ├── EmergencyActivation.t.sol          #  6 tests - Review finding 2 and checkHealth retries (mock)
 │   ├── EmergencyRecovery.t.sol            # 11 tests - Two-step exit, investment health and dust (mock)
@@ -320,6 +321,15 @@ Removing `nonReentrant` from `deposit` and `withdraw` makes 4 of these tests fai
 
 - `test_Redeem_AfterProfit_ExitingUserPaysFee` - After a 10 WETH profit on 100 WETH with a 10% fee, the exiting user receives 109 WETH and the fee recipient holds 1 WETH of value
 - `test_Deposit_AfterProfit_NewDepositorNotDiluted` - A depositor entering after the profit keeps the deposited value within 2 wei
+
+### DonationHighWaterMark.t.sol (2 tests, issue #1)
+
+The report in issue #1 claims that a donation to the vault, a fee assessment and the donor's exit leave the high-water mark above `totalAssets()` and steal the fee shares. A holder of half the shares donates 1,000,000 WETH, deposits 1 WETH to assess the fee (25%) and redeems everything:
+
+- `test_Donation_DonorExitLeavesNoHighWaterMarkGap` - The redeem lowers the high-water mark with `totalAssets()` (equal within 10 wei), the donor loses at least the fee on the donation and the fee recipient holds 250,000 WETH of value
+- `test_Donation_LaterYieldStillPaysFee` - 10 WETH of yield after the donor's exit pays 2.5 WETH of fee
+
+Keeping the high-water mark unchanged in `_withdraw()` makes both tests fail.
 
 ### EmergencyAccounting.t.sol (6 tests, review finding 1, mock)
 
