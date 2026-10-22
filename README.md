@@ -7,7 +7,7 @@
 
 A modular ERC-4626 vault with pluggable strategies. The repository contains a simple Aave V3 supply strategy and a leveraged WETH loop strategy that uses Uniswap V4 flash loans and Aave V3 E-Mode.
 
-> **Proof of concept. Not audited, and not deployed on any mainnet.** The only deployment tooling targets a testnet (`script/testnet/`). Do not use this code with real funds.
+> **Proof of concept for educational purposes. Not audited, and not deployed on any mainnet.** The only deployment tooling targets a testnet (`script/testnet/`). Do not use this code with real funds.
 
 ---
 
@@ -24,7 +24,7 @@ A modular ERC-4626 vault with pluggable strategies. The repository contains a si
 
 ## Demo app
 
-A web app (`app/`) runs the vault on Base Sepolia against the real Aave V3 pool, Uniswap V4 PoolManager and WETH of that testnet, with the test suite's parameters. Visitors can deposit testnet WETH, watch the loop as Aave holds it (collateral and idle WETH against debt and equity, projected to the second, with the health factor against its thresholds), withdraw, and run the emergency cycle themselves: a testnet-only contract, `DemoOperator`, holds the owner and admin roles and lets anyone join the whitelist, shock the thresholds above the live health factor, restore and reinvest. The previews are mirrored from the contracts and Aave with their rounding and checked against a Base Sepolia fork to the wei. How it is built, what the stand-in does and does not check, and how to deploy it: [app/README.md](./app/README.md).
+A web app (`app/`) runs the vault on Base Sepolia against the real Aave V3 pool, Uniswap V4 PoolManager and WETH of that testnet, with the test suite's parameters. Visitors can deposit testnet WETH, watch the loop as Aave holds it (collateral and idle WETH against debt and equity, projected to the second, with the health factor against its thresholds), withdraw, and run the emergency cycle themselves on a stress test page: a testnet-only contract, `DemoOperator`, holds the owner and admin roles and lets anyone join the whitelist, shock the thresholds above the live health factor, restore and reinvest. The previews are mirrored from the contracts and Aave with their rounding and checked against a Base Sepolia fork to the wei. How it is built, what the stand-in does and does not check, and how to deploy it: [app/README.md](./app/README.md).
 
 <!-- Live demo: https://vaults-poc.<your-subdomain>.workers.dev -->
 

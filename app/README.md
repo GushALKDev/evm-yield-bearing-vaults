@@ -2,17 +2,24 @@
 
 A web app for the vault in this repository, running on Base Sepolia against the real Aave V3 pool, Uniswap V4
 PoolManager and WETH of that testnet. Visitors can read the whole vault without a wallet, and with one they can join the
-whitelist, wrap Ether, deposit, withdraw or redeem, and run the emergency cycle: shock the thresholds, close the
-position with checkHealth(), restore and reinvest.
+whitelist, deposit Ether or WETH, withdraw or redeem, and run the emergency cycle on the stress test page: shock the
+thresholds, close the position with checkHealth(), restore and reinvest.
 
-Proof of concept, not audited. Testnet Ether has no value.
+Proof of concept for educational purposes, not audited. Testnet Ether has no value.
 
 <!-- Live: https://vaults-poc.<your-subdomain>.workers.dev -->
 
 ## What it shows
 
+- **What a depositor decides on, first.** The vault page opens with the net APY on a deposited WETH, the vault's value,
+  its leverage and its health factor, and one line that says why the APY is what it is: the collateral earns 10 times
+  Aave's supply rate and the debt costs 9 times its borrow rate. The explanations sit in tabs below (Overview, Risks,
+  Capacity, Fees, Contracts) while the position and the action panel stay in view on the right.
+- **One flow per action.** A deposit joins the whitelist, wraps Ether, approves the vault and deposits, as one button
+  with a stepper that says what each transaction does on chain; a withdrawal can unwrap the WETH it pays out.
 - **The loop, as Aave holds it.** Collateral and idle WETH against debt and equity, at the same scale, with the health
-  factor on a scale that marks Aave's liquidation point, the trip threshold and the re-arm threshold. The balances are
+  factor on a scale that marks Aave's liquidation point, the trip threshold and the re-arm threshold (the exit line and
+  the re-entry line in the app's copy). A connected depositor can switch it to their own slice of the position. The balances are
   projected to the current second from Aave's indexes with Aave 3.6's own rounding (`src/lib/aave.ts`), so the equity
   sliver visibly shrinks while the borrow rate exceeds the supply rate.
 - **Previews before every call.** Each deposit, withdrawal and emergency step shows the position before and after,
@@ -159,7 +166,8 @@ FOUNDRY_PROFILE=testnet forge test
 ## Deploy the app to Cloudflare Workers
 
 The app runs as `vaults-poc`, an assets-only Worker: there is no Worker script. `wrangler.jsonc` points it at `dist/`
-and holds the SPA fallback, which serves `index.html` for every page path (`/emergency`, `/how-it-works`).
+and holds the SPA fallback, which serves `index.html` for every page path (`/stress-test`, `/how-it-works`, and `/emergency`, the stress test's
+old path, which still opens it).
 `public/_headers` holds the cache and security headers; Vite copies it into `dist/`.
 
 First deploy, from a terminal in `app/`:

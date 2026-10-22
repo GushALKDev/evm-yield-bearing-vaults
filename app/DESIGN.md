@@ -6,7 +6,7 @@ Accent: **Indigo**, from the demo family table (same OKLCH lightness and chroma 
 
 | Role | Light | Dark |
 | :-- | :-- | :-- |
-| Accent (primary actions, equity, the headline figure, selected chips, focus, mark) | #5E5882 | #A6A2CD |
+| Accent (primary actions, equity, a positive net APY, selected chips and steps, focus, mark) | #5E5882 | #A6A2CD |
 | Accent hover | #4B4669 | #B7B3D9 |
 | Accent soft (selected chip, ok status, idle WETH hatch ground) | #E6E5F1 | #2F2D3F |
 | Text on the accent | #FFFFFF | #0E1412 |
@@ -15,8 +15,8 @@ Data colors of the loop drawing, defined only for what the drawing needs:
 
 | Role | Light | Dark |
 | :-- | :-- | :-- |
-| Collateral (aWETH held in Aave) | #C6C2E0 | #423F56 |
-| Debt (variable WETH debt), also the borrow APR figure | #6C9AB0 | #4F859F |
+| Collateral (aWETH held in Aave), also the supply bar of the yield breakdown | #C6C2E0 | #423F56 |
+| Debt (variable WETH debt), also the borrow bar of the yield breakdown | #6C9AB0 | #4F859F |
 | Equity (what the vault owns) | the accent | the accent |
 | Idle WETH (equity outside Aave) | the accent, hatched on accent soft | the same |
 
@@ -65,24 +65,31 @@ hashes; the reference's grounds, surfaces, ink, rules, danger and warn in both t
 
 ```
 header        wordmark (links to the vault page), network, pages, test ETH, wallet
-              pages: Vault, Emergency, How it works, on a second header row below 1024 px
-notice        one line: testnet, not audited, the testnet-only operator
+              pages: Vault, Stress test, How it works, on a second header row below 1024 px
+notice        one line: testnet, for educational purposes, not audited, anyone can run the stress test
 
-/             hero: headline + the loop + four figures
-              grid: your position and actions (left, wider) | Aave reserve, flash liquidity, performance fee (right)
-/emergency    the loop, then the four-step cycle (left) and the state card (right)
+/             head: headline, deposits status, four figures (net APY, vault value, leverage, safety), the why line
+              grid: tabs Overview (the loop, where the yield comes from), Risks, Capacity, Fees, Contracts (left,
+              wider) | your position and the action panel, sticky (right; first below 1024 px)
+/stress-test  head, the four-step cycle with only the current step open, the loop (left) | the state card (right)
+              /emergency, its old path, opens it too
 /how-it-works six mechanics + what runs here and what is a stand-in
 
 footer
 ```
 
 Left-aligned throughout. Two columns from 1024 px, one below. Numbered markers only for real sequences: the first-visit
-steps, the deposit flow and the emergency cycle.
+steps, the transactions of a deposit or withdrawal and the stress test cycle.
+
+Two levels of copy. The vault page and the stress test speak in what a depositor sees: safety, the exit line, the
+re-entry line, reopen, loop again. The contract names (checkHealth(), minHealthFactor, shock(), restore(), reinvest())
+sit next to them in small monospace, in Under the hood, and on How it works, which keeps the contract-level walkthrough.
 
 ## Rules
 
-- Copy names what the user does: Deposit, Withdraw, Redeem, Wrap, Shock, Restore, Reinvest. The button that says
-  Deposit WETH produces a toast that says WETH deposited.
+- Copy names what the user does: Deposit, Withdraw, Redeem, Push the line, Run the health check, Reopen the vault,
+  Loop again. The button that says Deposit 1 ETH ends in a toast that says WETH deposited; the steps before the last
+  report in the stepper instead of toasts of their own.
 - Every preview shows before and after, computed with the contracts' and Aave's own rounding.
 - Errors say what happened and what to do, decoded from the custom errors of every contract a call reaches.
 - Motion only where something changed: bars and the health factor marker ease to new positions, balances tick with

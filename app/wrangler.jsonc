@@ -1,5 +1,5 @@
 // Assets-only Worker for the static Vite build: there is no Worker script. The SPA fallback serves
-// index.html for every path that matches no file, which is how /emergency and /how-it-works load.
+// index.html for every path that matches no file, which is how /stress-test and /how-it-works load.
 {
   "name": "vaults-poc",
   "compatibility_date": "2026-10-21",
