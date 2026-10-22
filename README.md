@@ -13,7 +13,7 @@ A modular ERC-4626 vault with pluggable strategies. The repository contains a si
 
 **Live demo:** https://vaults-poc.gushalk.workers.dev
 
-[![The demo app's vault page, with the net APY and the loop read live from Base Sepolia](docs/images/demo-app.png)](https://vaults-poc.gushalk.workers.dev)
+[![The demo app's vault page with a connected position: the net APY, the loop and the deposit flow, read live from Base Sepolia](docs/images/demo-app.png)](https://vaults-poc.gushalk.workers.dev)
 
 ---
 
