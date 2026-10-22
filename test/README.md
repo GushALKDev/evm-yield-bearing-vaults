@@ -2,7 +2,7 @@
 
 ## Overview
 
-The suite is organized into unit tests (mocked dependencies), integration tests (mainnet fork), stateless fuzz tests, stateful invariant tests with the handler pattern and a gas benchmark. Results below were obtained on commit `9f599c4` (the last commit that changes code or tests) with Forge 1.7.1; fork suites run against Ethereum mainnet at block 26043110. See the [main README](../README.md) for the project overview, [Guide 3](../docs/03-security.md) for the trust assumptions and [Guide 4](../docs/04-review-notes.md) for the review notes.
+The suite is organized into unit tests (mocked dependencies), integration tests (mainnet fork), stateless fuzz tests, stateful invariant tests with the handler pattern and a gas benchmark. Results below were obtained on commit `51b3cf8` (the last commit that changes code or tests) with Forge 1.7.1; fork suites run against Ethereum mainnet at block 26043110. See the [main README](../README.md) for the project overview, [Guide 3](../docs/03-security.md) for the trust assumptions and [Guide 4](../docs/04-review-notes.md) for the review notes.
 
 ## Test Statistics
 

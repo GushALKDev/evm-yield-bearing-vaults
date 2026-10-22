@@ -120,7 +120,7 @@ docs/             guides: architecture, economics, security, review notes
 
 ## Testing
 
-Measured at commit `9f599c4` with Forge 1.7.1; fork suites run against Ethereum mainnet at block 26043110.
+Measured at commit `51b3cf8` with Forge 1.7.1; fork suites run against Ethereum mainnet at block 26043110.
 
 | Area | Result |
 |------|--------|
