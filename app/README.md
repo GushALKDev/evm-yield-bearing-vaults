@@ -7,7 +7,7 @@ thresholds, close the position with checkHealth(), restore and reinvest.
 
 Proof of concept for educational purposes, not audited. Testnet Ether has no value.
 
-<!-- Live: https://vaults-poc.<your-subdomain>.workers.dev -->
+Live demo: https://vaults-poc.gushalk.workers.dev
 
 ## What it shows
 
