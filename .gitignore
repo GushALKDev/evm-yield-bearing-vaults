@@ -4,10 +4,8 @@ out/
 build/
 artifacts/
 
-# Ignores development broadcast logs
-!/broadcast
-/broadcast/*/31337/
-/broadcast/**/dry-run/
+# Forge broadcast logs; deployed addresses live in app/src/config/deployments
+broadcast/
 
 # Docs
 github-description.md
