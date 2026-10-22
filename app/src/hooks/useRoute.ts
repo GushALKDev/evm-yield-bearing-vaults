@@ -1,10 +1,10 @@
 import { useSyncExternalStore } from 'react'
 
-export type Page = 'vault' | 'emergency' | 'how'
+export type Page = 'vault' | 'stress' | 'how'
 
 export const pages: { page: Page; path: string; label: string }[] = [
   { page: 'vault', path: '/', label: 'Vault' },
-  { page: 'emergency', path: '/emergency', label: 'Emergency' },
+  { page: 'stress', path: '/stress-test', label: 'Stress test' },
   { page: 'how', path: '/how-it-works', label: 'How it works' },
 ]
 
@@ -29,9 +29,16 @@ export function navigate(href: string) {
   window.dispatchEvent(new PopStateEvent('popstate'))
 }
 
-/** The page for the current path. Unknown paths show the vault: the host serves index.html for every path. */
+/** Paths a page had before, kept so that old links still land on it. */
+const aliases: Record<string, Page> = { '/emergency': 'stress' }
+
+/** The page for a URL. Unknown paths show the vault: the host serves index.html for every path. */
+export function pageFor(url: string): Page {
+  const path = url.split('#')[0].replace(/\/+$/, '') || '/'
+  return pages.find((p) => p.path === path)?.page ?? aliases[path] ?? 'vault'
+}
+
 export function useRoute(): { page: Page; url: string } {
   const url = useSyncExternalStore(subscribe, currentUrl)
-  const path = url.split('#')[0].replace(/\/+$/, '') || '/'
-  return { page: pages.find((p) => p.path === path)?.page ?? 'vault', url }
+  return { page: pageFor(url), url }
 }

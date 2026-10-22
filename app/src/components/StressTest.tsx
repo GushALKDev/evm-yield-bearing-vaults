@@ -3,18 +3,21 @@ import { useConnection } from 'wagmi'
 import { chain, explorerAddress } from '../config/chain'
 import { useSetPreview } from '../hooks/usePreview'
 import { useTx } from '../hooks/useTx'
-import { MAX_UINT256 } from '../lib/aave'
 import { operatorCallAbi, strategyCallAbi } from '../lib/abi'
 import { formatHealth, formatWeth, relativeTime, shortAddress } from '../lib/format'
 import type { VaultModel } from '../lib/model'
 import { position, simulateExit, simulateReinvest, SimulatedRevert, type Position } from '../lib/vault'
-import { LoopSheet } from './Hero'
+import { LoopSheet } from './Loop'
 
 type StepState = 'done' | 'next' | 'waiting'
 
 interface Step {
   title: string
+  /** One line for a collapsed step */
+  summary: string
   body: string
+  /** The contract call behind the button */
+  code: string
   preview: string
   /** Why the button is disabled, when it is */
   disabled?: string
@@ -66,9 +69,9 @@ function useSteps(model: VaultModel): Step[] {
     }
   }
   const healthDisabled = emergency && !unhealthy
-    ? 'Emergency mode is on and the position is closed: nothing to check.'
+    ? 'Emergency mode is on and the position is closed: nothing left to check.'
     : !unhealthy
-      ? `The health factor (${formatHealth(p.healthFactor)}) is at or above the trip threshold (${formatHealth(s.minHealthFactor)}), so checkHealth() would return true and change nothing.`
+      ? `The health factor (${formatHealth(p.healthFactor)}) is at or above the exit line (${formatHealth(s.minHealthFactor)}), so the check would return true and change nothing. Push the line first.`
       : undefined
 
   // 4. Reinvest
@@ -88,7 +91,7 @@ function useSteps(model: VaultModel): Step[] {
       const [a, b] = err.args
       reinvestError =
         err.errorName === 'HealthFactorBelowTarget'
-          ? `The rebuilt position would sit at ${formatHealth(a)}, below the re-arm threshold of ${formatHealth(b)}, so reinvest() reverts. Restore the thresholds first.`
+          ? `The rebuilt position would sit at ${formatHealth(a)}, below the re-entry line of ${formatHealth(b)}, so reinvest() reverts. Reopen the vault first, which resets the lines.`
           : `Reinvesting would revert now (${err.errorName}).`
     }
   }
@@ -98,53 +101,61 @@ function useSteps(model: VaultModel): Step[] {
 
   return [
     {
-      title: 'Shock the thresholds',
-      body: "Raises the strategy's trip threshold above its live health factor, the way the test suite simulates an unhealthy position. On mainnet the health factor itself would fall: interest accrual or an Aave parameter change.",
+      title: 'Push the exit line above the position',
+      summary: "Raises the exit line above today's health factor.",
+      body: "On mainnet the health factor itself would fall, through interest or an Aave parameter change. Here the line moves instead, the way the test suite does it, so the position reads as unhealthy without touching it.",
+      code: 'DemoOperator.shock()',
       preview: hasDebt
-        ? `Trip threshold ${formatHealth(s.minHealthFactor)} to ${formatHealth(shockMin)}, re-arm threshold ${formatHealth(s.targetHealthFactor)} to ${formatHealth(shockTarget)}, from a health factor of ${formatHealth(p.healthFactor)} at the latest block.`
-        : 'No debt, no health factor to shock.',
+        ? `Exit line ${formatHealth(s.minHealthFactor)} to ${formatHealth(shockMin)} and re-entry line ${formatHealth(s.targetHealthFactor)} to ${formatHealth(shockTarget)}, just above today's ${formatHealth(p.healthFactor)}.`
+        : 'No debt, no health factor to push against.',
       disabled: shockDisabled,
       state: state(1),
-      label: 'Shock the thresholds',
-      done: 'Thresholds raised',
+      label: 'Push the line',
+      done: 'Exit line raised',
       run: () => ({ address: d.operator, abi: operatorCallAbi, functionName: 'shock' }),
     },
     {
-      title: 'Call checkHealth()',
-      body: 'Permissionless, on the strategy itself. Below the trip threshold it puts the vault in emergency mode, which tries to close the whole position with one flash loan for the entire debt and keeps the equity as idle WETH.',
-      preview: unhealthy ? exitPreview : `Healthy: returns true and changes nothing.`,
+      title: 'Let the vault exit',
+      summary: "Anyone calls the strategy's health check; it repays the whole debt with one flash loan and keeps the equity as idle WETH.",
+      body: 'The health check is permissionless and lives on the strategy itself; the repository ships no keeper that calls it. Below the exit line it puts the vault in emergency mode and closes the whole position with one flash loan for the entire debt. Deposits close; withdrawals stay open.',
+      code: 'WETHLoopStrategy.checkHealth()',
+      preview: unhealthy ? exitPreview : 'Healthy: the check returns true and changes nothing.',
       disabled: healthDisabled,
       state: state(2),
-      label: 'Call checkHealth()',
-      done: 'checkHealth() ran',
+      label: 'Run the health check',
+      done: 'Health check ran',
       run: () => ({ address: d.strategy, abi: strategyCallAbi, functionName: 'checkHealth' }),
       after: exitAfter,
     },
     {
-      title: 'Restore',
-      body: "The first recovery step: clears emergency mode on the vault and the strategy, and puts the thresholds back to their deployment values. The idle WETH stays idle, so this step cannot fail because of Aave or Uniswap.",
+      title: 'Reopen the vault',
+      summary: `Clears emergency mode and puts the lines back at ${formatHealth(st.defaultMinHealthFactor, 2)} and ${formatHealth(st.defaultTargetHealthFactor, 2)}. The WETH stays idle.`,
+      body: 'The first of two recovery steps: it clears emergency mode on the vault and the strategy and puts both lines back to their deployment values. The idle WETH stays idle, so this step cannot fail because of Aave or Uniswap.',
+      code: 'DemoOperator.restore()',
       preview:
         emergency || shocked
-          ? `${emergency ? 'Clears emergency mode. ' : ''}${shocked ? `Thresholds back to ${formatHealth(st.defaultMinHealthFactor)} and ${formatHealth(st.defaultTargetHealthFactor)}.` : ''}`
-          : 'Nothing to restore right now.',
-      disabled: !ownsRoles ? noRoles : !emergency && !shocked ? 'Emergency mode is off and the thresholds are at their deployment values.' : undefined,
+          ? `${emergency ? 'Clears emergency mode. ' : ''}${shocked ? `Lines back to ${formatHealth(st.defaultMinHealthFactor)} and ${formatHealth(st.defaultTargetHealthFactor)}.` : ''}`
+          : 'Nothing to reopen right now.',
+      disabled: !ownsRoles ? noRoles : !emergency && !shocked ? 'Emergency mode is off and the lines are at their deployment values.' : undefined,
       state: state(3),
-      label: 'Restore',
-      done: 'Restored',
+      label: 'Reopen the vault',
+      done: 'Vault reopened',
       run: () => ({ address: d.operator, abi: operatorCallAbi, functionName: 'restore' }),
     },
     {
-      title: 'Reinvest',
-      body: 'The second step, kept separate on purpose: loops the idle WETH at the target leverage again and reverts unless the rebuilt position reaches the re-arm threshold.',
-      preview: emergency ? 'Waits for restore: reinvest() reverts during emergency mode.' : (reinvestError ?? reinvestPreview),
+      title: 'Loop again',
+      summary: `Rebuilds the ${s.targetLeverage.toString()}x position from the idle WETH, only if it lands at the re-entry line or above.`,
+      body: 'The second step, kept separate on purpose: it loops the idle WETH at the target leverage again and reverts unless the rebuilt position reaches the re-entry line, which sits above the exit line, so a recovery does not re-arm into a position the health check would close at once.',
+      code: 'vault.reinvest()',
+      preview: emergency ? 'Waits for the reopen step: reinvest() reverts during emergency mode.' : (reinvestError ?? reinvestPreview),
       disabled: !ownsRoles
         ? noRoles
         : emergency
-          ? 'Restore first: reinvest() reverts during emergency mode.'
+          ? 'Reopen the vault first: reinvest() reverts during emergency mode.'
           : (reinvestError ?? (idle < st.minInvestAssets ? 'Nothing idle to loop right now.' : undefined)),
       state: state(4),
-      label: 'Reinvest',
-      done: 'Reinvested',
+      label: 'Loop again',
+      done: 'Position rebuilt',
       run: () => ({ address: d.operator, abi: operatorCallAbi, functionName: 'reinvest' }),
       after: reinvestAfter,
     },
@@ -158,22 +169,30 @@ function StatusCard({ model }: { model: VaultModel }) {
   return (
     <div className="card">
       <div className="card-title">
-        <h2>State</h2>
+        <h2>The vault now</h2>
         <span className="status" data-tone={live.vault.emergency ? 'warn' : 'ok'}>
           {live.vault.emergency ? 'Emergency mode' : 'Open for deposits'}
         </span>
       </div>
       <dl className="rows">
         <div className="row">
-          <dt>Trip threshold, checkHealth()</dt>
+          <dt>Safety (health factor)</dt>
+          <dd>{formatHealth(p.healthFactor)}</dd>
+        </div>
+        <div className="row">
+          <dt>
+            Exit line <span className="faint mono">minHealthFactor</span>
+          </dt>
           <dd>
-            {formatHealth(live.strategy.minHealthFactor)} <span className="faint">deployed {formatHealth(st.defaultMinHealthFactor, 2)}</span>
+            {formatHealth(live.strategy.minHealthFactor)} <span className="faint">default {formatHealth(st.defaultMinHealthFactor, 2)}</span>
           </dd>
         </div>
         <div className="row">
-          <dt>Re-arm threshold, reinvest()</dt>
+          <dt>
+            Re-entry line <span className="faint mono">targetHealthFactor</span>
+          </dt>
           <dd>
-            {formatHealth(live.strategy.targetHealthFactor)} <span className="faint">deployed {formatHealth(st.defaultTargetHealthFactor, 2)}</span>
+            {formatHealth(live.strategy.targetHealthFactor)} <span className="faint">default {formatHealth(st.defaultTargetHealthFactor, 2)}</span>
           </dd>
         </div>
         <div className="row">
@@ -181,7 +200,7 @@ function StatusCard({ model }: { model: VaultModel }) {
           <dd>{p.debt > 0n ? `Open, ${formatWeth(p.debt)} WETH of debt` : p.idle > 0n ? `Closed, ${formatWeth(p.idle)} WETH idle` : 'None'}</dd>
         </div>
         <div className="row">
-          <dt>Last shock</dt>
+          <dt>Last push</dt>
           <dd>{live.lastShockAt === 0n ? 'Never' : `${relativeTime(Number(model.now - live.lastShockAt))} ago`}</dd>
         </div>
         <div className="row">
@@ -198,7 +217,7 @@ function StatusCard({ model }: { model: VaultModel }) {
         </div>
       </dl>
       <p className="hint" style={{ marginTop: 10 }}>
-        The contracts never close withdrawals: during emergency mode they are paid from the idle WETH the exit left, or
+        Withdrawals stay open in every step: during emergency mode they are paid from the idle WETH the exit left, or
         deleverage the position proportionally if the exit failed. What can still limit them is liquidity (Aave's and the
         PoolManager's), a paused reserve or a health factor below 1, which maxWithdraw() reports.
       </p>
@@ -206,7 +225,7 @@ function StatusCard({ model }: { model: VaultModel }) {
   )
 }
 
-export function Emergency({ model, onConnect }: { model: VaultModel; onConnect: () => void }) {
+export function StressTest({ model, onConnect }: { model: VaultModel; onConnect: () => void }) {
   const steps = useSteps(model)
   const { status, chainId } = useConnection()
   const { run, busy } = useTx()
@@ -219,63 +238,71 @@ export function Emergency({ model, onConnect }: { model: VaultModel; onConnect: 
     setPreview(nextAfter && nextTitle ? { label: `the next step (${nextTitle.toLowerCase()})`, after: nextAfter } : null)
   }, [nextAfter, nextTitle, setPreview])
   useEffect(() => () => setPreview(null), [setPreview])
-  const noDebt = model.position.healthFactor === MAX_UINT256
+  const emergency = model.live.vault.emergency
 
   return (
-    <section className="section">
-      <div className="wrap">
-        <div className="section-head">
-          <h2>Exit before liquidation, and back</h2>
-          <p>
-            Once Aave's health factor falls below a threshold, anyone can make the strategy close its own position, before Aave
-            could liquidate it, by calling checkHealth(); the repository ships no keeper that calls it. Re-arming takes two
-            separate steps. On this testnet anyone can run the whole cycle on the shared vault: it moves every
-            depositor's position into idle WETH and back, without losing their equity beyond rounding.
-          </p>
+    <>
+      <section className="wrap top">
+        <div className="top-head">
+          <div>
+            <h1>Stress test: exit before liquidation, and back.</h1>
+            <p className="top-sub">
+              Make the position read as unhealthy, let the vault close it on its own before Aave could liquidate it, then
+              bring it back. On this testnet anyone can run the cycle on the shared vault: it moves every depositor's
+              position into idle WETH and back, and their equity stays theirs except for rounding.
+            </p>
+          </div>
+          <span className="status" data-tone={emergency ? 'warn' : 'ok'}>
+            {emergency ? 'Emergency mode' : 'Vault healthy'}
+          </span>
         </div>
-        <LoopSheet model={model} title="The position now" />
-        <div className="two-col" style={{ marginTop: 20 }}>
+      </section>
+      <div className="wrap layout">
+        <div className="stack">
           <div className="card">
-            <div className="card-title">
-              <h2>The cycle</h2>
-              <span className="card-sub">{noDebt ? 'No open position' : `Health factor ${formatHealth(model.position.healthFactor)}`}</span>
-            </div>
             <div className="cycle">
               {steps.map((s, i) => (
-                <div className="cycle-step" key={s.title} data-state={s.state}>
-                  <b>{i + 1}</b>
+                <div className="cycle-step" key={s.title} data-state={s.state === 'waiting' ? 'later' : s.state}>
+                  <b>{s.state === 'done' ? '✓' : i + 1}</b>
                   <div className="cycle-body">
                     <h3>{s.title}</h3>
-                    <p>{s.body}</p>
-                    <p className="hint" style={{ color: 'var(--ink)' }}>
-                      {s.preview}
-                    </p>
-                    <div className="cycle-actions">
-                      {connected ? (
-                        <button
-                          className={s.state === 'next' ? 'btn btn-primary' : 'btn'}
-                          disabled={!!s.disabled || !!busy || !model.chainKnown}
-                          onClick={() => run(s.label, s.done, s.run)}
-                        >
-                          {busy === s.label ? 'Working…' : s.label}
-                        </button>
-                      ) : i === 0 ? (
-                        <button className="btn btn-primary" onClick={onConnect}>
-                          Connect a wallet to run it
-                        </button>
-                      ) : null}
-                      {s.disabled && connected ? <span className="hint">{s.disabled}</span> : null}
-                    </div>
+                    {s.state === 'next' ? (
+                      <>
+                        <p>{s.body}</p>
+                        <p className="hint" style={{ color: 'var(--ink)' }}>
+                          {s.preview}
+                        </p>
+                        <div className="cycle-actions">
+                          {connected ? (
+                            <button className="btn btn-primary" disabled={!!s.disabled || !!busy || !model.chainKnown} onClick={() => run(s.label, s.done, s.run)}>
+                              {busy === s.label ? 'Working…' : s.label}
+                            </button>
+                          ) : (
+                            <button className="btn btn-primary" onClick={onConnect}>
+                              Connect a wallet to run it
+                            </button>
+                          )}
+                          <span className="hint">
+                            {model.shock.ownsRoles || i === 1 ? 'Anyone can call it. ' : null}
+                            <span className="code">{s.code}</span>
+                          </span>
+                        </div>
+                        {s.disabled && connected ? <p className="hint">{s.disabled}</p> : null}
+                      </>
+                    ) : (
+                      <p>{s.summary}</p>
+                    )}
                   </div>
                 </div>
               ))}
             </div>
           </div>
-          <div className="stack">
-            <StatusCard model={model} />
-          </div>
+          <LoopSheet model={model} title="The position now" stress />
         </div>
+        <aside className="side side-after">
+          <StatusCard model={model} />
+        </aside>
       </div>
-    </section>
+    </>
   )
 }

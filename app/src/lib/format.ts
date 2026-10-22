@@ -42,6 +42,11 @@ export function formatLeverage(collateral: bigint, equity: bigint): string {
   return `${formatFixed((collateral * WAD) / equity, 18, 2)}x`
 }
 
+/** A multiple at 1e18 scale with up to two decimals and no trailing zeros: 10, 9.5, 9.99. */
+export function formatMultiple(value18: bigint): string {
+  return formatFixed(value18, 18, 2).replace(/\.?0+$/, '')
+}
+
 /** Basis points as a percentage: 8000 -> 80%. */
 export function formatBps(bps: bigint): string {
   const whole = bps / 100n

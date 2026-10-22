@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
-import { AccountCard } from './components/Account'
-import { Emergency } from './components/Emergency'
+import { AccountSide } from './components/Account'
+import { VaultDetails } from './components/Details'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { FaucetDialog } from './components/FaucetDialog'
-import { Hero } from './components/Hero'
-import { AaveCard, FeeCard } from './components/MarketCards'
 import { Footer, Header, HowItWorks, Notice } from './components/Sections'
+import { StressTest } from './components/StressTest'
 import { Toasts } from './components/Toasts'
+import { VaultTop } from './components/Top'
 import { ConnectDialog } from './components/Wallet'
 import { chain, deployment, links } from './config/chain'
 import { useModel } from './hooks/useModel'
@@ -48,19 +48,16 @@ function Vault() {
         <main>
           {page === 'vault' ? (
             <>
-              <Hero model={model} />
-              <div className="wrap main-grid">
-                <div className="stack">
-                  <AccountCard model={model} onConnect={openConnect} onFaucet={() => setFaucetOpen(true)} />
-                </div>
-                <div className="stack">
-                  <AaveCard model={model} />
-                  <FeeCard model={model} />
-                </div>
+              <VaultTop model={model} />
+              <div className="wrap layout">
+                <VaultDetails model={model} />
+                <aside className="side">
+                  <AccountSide model={model} onConnect={openConnect} onFaucet={() => setFaucetOpen(true)} />
+                </aside>
               </div>
             </>
           ) : null}
-          {page === 'emergency' ? <Emergency model={model} onConnect={openConnect} /> : null}
+          {page === 'stress' ? <StressTest model={model} onConnect={openConnect} /> : null}
           {page === 'how' ? <HowItWorks model={model} /> : null}
         </main>
       ) : (

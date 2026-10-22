@@ -55,8 +55,8 @@ export function Notice() {
   return (
     <div className="notice">
       <div className="wrap">
-        Testnet proof of concept: the ETH here has no value. Not audited. Runs on the real Aave V3 and Uniswap V4 testnet
-        deployments; the vault's owner and admin roles sit with a testnet-only contract anyone can call:{' '}
+        Testnet proof of concept for educational purposes, not audited; the ETH here has no value. It runs on the real Aave
+        V3 and Uniswap V4 testnet deployments, and anyone can run the stress test on this shared vault:{' '}
         <Link href="/how-it-works#stand-ins">how and why</Link>.
       </div>
     </div>
@@ -97,8 +97,8 @@ export function HowItWorks({ model }: { model: VaultModel }) {
           <div className="mechanic">
             <h3>Exit before liquidation</h3>
             <p>
-              Anyone can call checkHealth(). When Aave reports a health factor below the trip threshold (now{' '}
-              {formatHealth(s.minHealthFactor)}), the strategy puts the vault in emergency mode, which tries to close the whole
+              Anyone can call checkHealth(). When Aave reports a health factor below the trip threshold, minHealthFactor (the
+              exit line on the vault page, now {formatHealth(s.minHealthFactor)}), the strategy puts the vault in emergency mode, which tries to close the whole
               position with one flash loan for the entire debt. Emergency mode blocks deposits, not withdrawals: they are paid from
               the idle WETH the exit leaves, or deleverage proportionally if the exit failed.
             </p>
@@ -107,7 +107,8 @@ export function HowItWorks({ model }: { model: VaultModel }) {
             <h3>Two steps to recover</h3>
             <p>
               Leaving emergency mode only clears the flags; the idle WETH stays idle. A separate reinvest() loops it again and
-              reverts unless the rebuilt position reaches the re-arm threshold (now {formatHealth(s.targetHealthFactor)}), which
+              reverts unless the rebuilt position reaches the re-arm threshold, targetHealthFactor (the re-entry line, now{' '}
+              {formatHealth(s.targetHealthFactor)}), which
               sits above the trip threshold, so a recovery does not re-arm into a position checkHealth() would close at once.
             </p>
           </div>
@@ -191,7 +192,7 @@ export function Footer({ model }: { model: VaultModel | null }) {
   return (
     <footer className="site-footer">
       <div className="wrap">
-        <p>Proof of concept, not audited. Testnet ETH has no value.</p>
+        <p>Proof of concept for educational purposes, not audited. Testnet ETH has no value.</p>
         <nav className="footer-links" aria-label="Links">
           <a href={links.repo} target="_blank" rel="noreferrer">
             Source code

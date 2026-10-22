@@ -47,7 +47,12 @@ export function useTx() {
   const [busy, setBusy] = useState<string | null>(null)
 
   const run = useCallback(
-    async (label: string, done: string, build: () => Promise<ContractCall> | ContractCall, opts: { afterApproval?: boolean } = {}): Promise<boolean> => {
+    async (
+      label: string,
+      done: string,
+      build: () => Promise<ContractCall> | ContractCall,
+      opts: { afterApproval?: boolean; quiet?: boolean } = {},
+    ): Promise<boolean> => {
       if (!address) return false
       setBusy(label)
       const id = toasts.push({ tone: 'pending', title: label, body: 'Checking the call against the chain…' })
@@ -82,7 +87,9 @@ export function useTx() {
           return false
         }
         if (receipt.status !== 'success') throw new Error(LANDED_REVERT)
-        toasts.update(id, { tone: 'success', title: done, body: undefined })
+        // A step in the middle of a flow reports its progress in the flow itself, so its toast goes on success
+        if (opts.quiet) toasts.dismiss(id)
+        else toasts.update(id, { tone: 'success', title: done, body: undefined })
         await queryClient.invalidateQueries()
         return true
       } catch (err) {

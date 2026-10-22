@@ -5,6 +5,8 @@ import type { Position } from '../lib/vault'
 export interface Preview {
   label: string
   after: Position
+  /** The visitor's vault shares and the total supply after the action, to outline their slice */
+  share?: { shares: bigint; supply: bigint }
 }
 
 // The value and the setter live in separate contexts: a component that publishes a preview must not re-render when
@@ -13,7 +15,7 @@ const PreviewValue = createContext<Preview | null>(null)
 const PreviewSetter = createContext<((p: Preview | null) => void) | null>(null)
 
 const keyOf = (p: Preview | null) =>
-  p ? `${p.label}|${p.after.collateral}|${p.after.debt}|${p.after.idle}|${p.after.healthFactor}` : ''
+  p ? `${p.label}|${p.after.collateral}|${p.after.debt}|${p.after.idle}|${p.after.healthFactor}|${p.share?.shares}|${p.share?.supply}` : ''
 
 export function PreviewProvider({ children }: { children: ReactNode }) {
   const [preview, setPreview] = useState<Preview | null>(null)

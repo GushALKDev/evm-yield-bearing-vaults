@@ -35,7 +35,7 @@ export function describeError(err: unknown): string {
     case 'NotWhitelisted':
       return 'This address is not on the vault whitelist yet. Join it first, from your position card.'
     case 'VaultInEmergency':
-      return 'The vault is in emergency mode, which closes deposits. Withdrawals stay open; anyone can restore it from the Emergency page.'
+      return 'The vault is in emergency mode, which closes deposits. Withdrawals stay open; anyone can reopen it from the stress test.'
     case 'ERC4626ExceededMaxWithdraw':
       return `That is more than the ${weth(a[2])} you can withdraw right now. Equity shrinks a little every second at current Aave rates: use Max to redeem everything.`
     case 'ERC4626ExceededMaxRedeem':
@@ -57,11 +57,11 @@ export function describeError(err: unknown): string {
 
     // Strategy
     case 'HealthFactorBelowMinimum':
-      return `The position would end at a health factor of ${hf(a[0])}, below the trip threshold of ${hf(a[1])}, so the strategy refuses new investments. Call checkHealth or restore on the Emergency page.`
+      return `The position would end at a health factor of ${hf(a[0])}, below the exit line of ${hf(a[1])}, so the strategy refuses new investments. Run the exit or reopen the vault from the stress test.`
     case 'HealthFactorBelowTarget':
-      return `Reinvesting would leave a health factor of ${hf(a[0])}, below the re-arm threshold of ${hf(a[1])}.`
+      return `Reinvesting would leave a health factor of ${hf(a[0])}, below the re-entry line of ${hf(a[1])}.`
     case 'StrategyInEmergency':
-      return 'The strategy is in emergency mode. Restore it first, from the Emergency page.'
+      return 'The strategy is in emergency mode. Reopen it first, from the stress test.'
     case 'WithdrawExceedsEquity':
       return `The strategy holds ${weth(a[1])} of equity, less than the ${weth(a[0])} it was asked for.`
     case 'InsufficientEquity':
@@ -82,14 +82,14 @@ export function describeError(err: unknown): string {
     // Demo operator
     case 'ShockCooldown': {
       const next = new Date(Number(a[0] as bigint) * 1000)
-      return `A shock ran less than an hour ago. The next one opens at ${next.toLocaleTimeString()}.`
+      return `The exit line was pushed less than an hour ago. The next push opens at ${next.toLocaleTimeString()}.`
     }
     case 'NoOpenPosition':
-      return 'The strategy has no debt, so there is no health factor to shock. Deposit or reinvest first.'
+      return 'The strategy has no debt, so there is no health factor to push against. Deposit or loop again first.'
     case 'AlreadyInEmergency':
-      return 'The vault is already in emergency mode. Restore it first.'
+      return 'The vault is already in emergency mode. Reopen it first.'
     case 'NothingToRestore':
-      return 'Nothing to restore: emergency mode is off and the thresholds are at their deployment values.'
+      return 'Nothing to reopen: emergency mode is off and the lines are at their deployment values.'
 
     // Aave
     case 'BorrowCapExceeded':

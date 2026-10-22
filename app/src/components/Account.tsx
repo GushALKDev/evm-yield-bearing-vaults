@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useConnection } from 'wagmi'
+import { readContract } from 'wagmi/actions'
 import { chain, links } from '../config/chain'
 import { useSetPreview } from '../hooks/usePreview'
 import { useTx, type ContractCall } from '../hooks/useTx'
 import { operatorAbi, vaultCallAbi, wethAbi } from '../lib/abi'
+import { depositSteps, projectYear, withdrawSteps, yieldBreakdown, type Asset, type FlowStep, type StepKind } from '../lib/flow'
 import { formatBps, formatHealth, formatPct, formatWeth, parseAmount, toInput } from '../lib/format'
 import type { AccountView, VaultModel } from '../lib/model'
 import {
@@ -14,97 +16,91 @@ import {
   simulateRedeem,
   simulateWithdraw,
   SimulatedRevert,
+  vaultToAssets,
   type Position,
   type State,
 } from '../lib/vault'
+import { wagmiConfig } from '../wagmi'
 import { Link } from './Sections'
 
-/** Ether kept back when wrapping everything, for gas. Base Sepolia gas costs far less, but the wallet needs some. */
+/** Ether kept back when paying with Ether, for gas. Base Sepolia gas costs far less, but the wallet needs some. */
 const GAS_RESERVE = 10n ** 14n
 
 /* ------------------------------------------------------------------ */
-/* Position summary                                                    */
+/* Position                                                            */
 /* ------------------------------------------------------------------ */
 
-function PositionSummary({ model, acc }: { model: VaultModel; acc: AccountView }) {
+function PositionCard({ model, acc }: { model: VaultModel; acc: AccountView }) {
   const supply = model.live.vault.totalSupply
   const sharePct = supply > 0n ? (acc.shares * 10n ** 18n) / supply : 0n
-  const p = model.position
-  const slice = (x: bigint) => (supply > 0n ? (x * acc.shares) / supply : 0n)
+  const all = acc.maxWithdraw >= acc.assetsAtChain
   return (
-    <>
+    <div className="card">
+      <div className="card-title">
+        <h2>Your position</h2>
+        {acc.shares > 0n ? <span className="card-sub">{formatPct(sharePct)} of the vault</span> : null}
+      </div>
       <div className="position-main">
         <span className="position-state">{acc.shares > 0n ? 'Your shares are worth' : 'No vault shares yet'}</span>
-        <span className="position-amount">
-          {formatWeth(acc.assets, 6)}
+        <span className="position-amount" title={`${formatWeth(acc.assets, 18)} WETH`}>
+          {formatWeth(acc.assets)}
           <small>WETH</small>
         </span>
         <span className="hint">
           {acc.shares > 0n
-            ? `${formatWeth(acc.shares, 6)} YBV, ${formatPct(sharePct)} of the vault. The value moves every second with Aave's interest.`
-            : 'Deposit WETH and the strategy loops it at the target leverage in the same transaction.'}
+            ? `${formatWeth(acc.shares)} YBV shares. Withdrawable now: ${all ? 'all of it' : `${formatWeth(acc.maxWithdraw)} WETH`}.`
+            : 'Deposit ETH or WETH and the strategy loops it at the target leverage in the same transaction.'}
         </span>
       </div>
       <dl className="rows">
-        {acc.shares > 0n ? (
-          <>
-            <div className="row">
-              <dt>Your slice of the collateral and debt</dt>
-              <dd>
-                {formatWeth(slice(p.collateral))} <span className="faint">/</span> {formatWeth(slice(p.debt))}
-              </dd>
-            </div>
-            <div className="row">
-              <dt>Withdrawable now</dt>
-              <dd>{formatWeth(acc.maxWithdraw, 6)} WETH</dd>
-            </div>
-          </>
-        ) : null}
         <div className="row">
           <dt>Wallet</dt>
           <dd>
-            {formatWeth(acc.data.weth)} WETH <span className="faint">·</span> {acc.data.eth !== undefined ? formatWeth(acc.data.eth) : '…'} ETH
+            {acc.data.eth !== undefined ? formatWeth(acc.data.eth) : '…'} ETH <span className="faint">·</span> {formatWeth(acc.data.weth)} WETH
           </dd>
         </div>
       </dl>
-    </>
+    </div>
   )
 }
 
 /* ------------------------------------------------------------------ */
-/* Action plans                                                        */
+/* Plans                                                               */
 /* ------------------------------------------------------------------ */
 
-type Tab = 'deposit' | 'withdraw' | 'wrap'
-
-const tabs: { id: Tab; label: string }[] = [
-  { id: 'deposit', label: 'Deposit' },
-  { id: 'withdraw', label: 'Withdraw' },
-  { id: 'wrap', label: 'Wrap ETH' },
-]
+type Tab = 'deposit' | 'withdraw'
 
 interface Row {
   label: string
-  before: string
+  before?: string
   after: string
+  tone?: 'danger'
+}
+
+/** One transaction of the flow, ready to run. */
+interface StepDef {
+  name: string
+  what: string
+  label: string
+  done: string
+  call: () => Promise<ContractCall> | ContractCall
 }
 
 interface Plan {
-  symbol: 'WETH' | 'ETH'
+  symbol: Asset
   max: bigint
-  maxLabel: string
-  maxHint?: string
-  /** Allowance the call needs from the vault, if it pulls WETH */
-  approve?: { current: bigint; needed: bigint }
+  balanceLabel: string
   /** Why the action is closed whatever the amount */
   blocked?: string
   error?: string
-  note?: string
+  hint?: string
   rows: Row[]
-  after?: Position
+  /** The deeper view: what happens in Aave and Uniswap */
+  hood?: { note: string; rows: Row[] }
+  preview?: { after: Position; shares: bigint; supply: bigint }
+  steps: FlowStep[]
+  defs: Partial<Record<StepKind, StepDef>>
   verb: string
-  done: string
-  call: () => ContractCall
 }
 
 function revertMessage(err: unknown, model: VaultModel): string {
@@ -112,7 +108,7 @@ function revertMessage(err: unknown, model: VaultModel): string {
   const [x, y] = err.args
   switch (err.errorName) {
     case 'HealthFactorBelowMinimum':
-      return `The position would end at a health factor of ${formatHealth(x)}, below the trip threshold of ${formatHealth(y)}.`
+      return `The position would end at a health factor of ${formatHealth(x)}, below the exit line of ${formatHealth(y)}.`
     case 'BorrowCapExceeded':
       return "This would take Aave's WETH borrow cap past its limit."
     case 'SupplyCapExceeded':
@@ -155,175 +151,258 @@ function positionRows(before: Position, after: Position): Row[] {
 }
 
 function depositBlocked(model: VaultModel, acc: AccountView): string | undefined {
-  switch (depositClosedReason(model.state, acc.data.whitelisted, model.chainTime)) {
+  // Joining is a step of the flow while DemoOperator holds the owner role
+  const joinable = acc.data.whitelisted || model.shock.ownsRoles
+  switch (depositClosedReason(model.state, joinable, model.chainTime)) {
     case null:
       return undefined
     case 'emergency':
-      return 'Deposits are closed while the vault is in emergency mode. Anyone can restore it on the Emergency page.'
+      return 'Deposits are closed while the vault is in emergency mode. Anyone can reopen it from the stress test.'
     case 'whitelist':
-      return 'Join the whitelist first, from the button above.'
+      return 'This address is not on the whitelist, and the demo operator no longer holds the owner role, so only the owner can add it.'
     case 'strategy':
-      return 'The strategy is in emergency mode. Anyone can restore it on the Emergency page.'
+      return 'The strategy is in emergency mode. Anyone can reopen it from the stress test.'
     case 'belowTrip':
-      return 'Deposits are closed: the health factor is below the trip threshold, so an investment would revert. Anyone can call checkHealth() on the Emergency page, or restore the thresholds if a shock raised them.'
+      return 'Deposits are closed: the health factor is below the exit line, so an investment would revert. Anyone can run the exit, or reset the line if a stress test raised it, from the stress test.'
     case 'margin':
-      return `Deposits are closed: the health factor sits within ${formatBps(model.state.strategy.params.marginBps)} of the trip threshold, where maxDeposit() reports 0 to cover Aave's rounding, although checkHealth() would not trip yet. The emergency cycle (shock, checkHealth, restore, reinvest) rebuilds the position at the re-arm threshold.`
+      return `Deposits are closed: the health factor sits within ${formatBps(model.state.strategy.params.marginBps)} of the exit line, where maxDeposit() reports 0 to cover Aave's rounding. The stress test (push, exit, reopen, loop again) rebuilds the position at the re-entry line.`
     case 'slice':
-      return 'Deposits are closed: a slice at the target leverage would start below the trip threshold.'
+      return 'Deposits are closed: a slice at the target leverage would start below the exit line.'
   }
 }
 
-function useActionPlan(model: VaultModel, acc: AccountView, tab: Tab, amount: bigint | null, usedMax: boolean, unwrap: boolean, account: `0x${string}`): Plan {
+function inYear(model: VaultModel, value: bigint, after: Position, afterEquity: bigint): Row | null {
+  const y = yieldBreakdown(after, afterEquity, model.supplyRate, model.borrowRate)
+  if (!y) return null
+  return { label: "In a year at today's rates", after: `≈ ${formatWeth(projectYear(value, y.net))} WETH`, tone: y.net < 0n ? 'danger' : undefined }
+}
+
+function buildPlan(model: VaultModel, acc: AccountView, tab: Tab, a: bigint, usedMax: boolean, asset: Asset, account: `0x${string}`): Plan {
   const d = model.deployment
   const t = model.chainTime
   const s: State = model.state
   const before = model.positionAtChain
-  const a = amount ?? 0n
+  const eth = acc.data.eth ?? 0n
 
-  switch (tab) {
-    case 'deposit': {
-      const wallet = acc.data.weth
-      const rows: Row[] = []
-      const blocked = depositBlocked(model, acc)
-      let error: string | undefined
-      let after: Position | undefined
-      let note: string | undefined
-      if (!blocked && a > wallet) error = 'More than your WETH balance. Wrap ETH first, in the Wrap ETH tab.'
-      if (!blocked && !error && a > 0n) {
-        try {
-          const res = simulateDeposit(s, a, acc.data.whitelisted, t)
-          after = position(res.state, t)
-          rows.push({ label: 'Your shares', before: formatWeth(acc.shares, 6), after: formatWeth(acc.shares + res.shares, 6) })
-          rows.push(...positionRows(before, after))
-          note = res.invested
-            ? `In the same transaction: a ${formatWeth(a * (s.strategy.params.targetLeverage - 1n))} WETH flash loan from the Uniswap V4 PoolManager, ${formatWeth(a * s.strategy.params.targetLeverage)} WETH supplied to Aave and the flash loan repaid with WETH borrowed from Aave.`
-            : `Below ${formatWeth(s.strategy.params.minInvestAssets, 6)} WETH the strategy keeps a deposit idle; reinvest() loops it later.`
-        } catch (err) {
-          error = revertMessage(err, model)
+  if (tab === 'deposit') {
+    const spendable = asset === 'ETH' ? (eth > GAS_RESERVE ? eth - GAS_RESERVE : 0n) : acc.data.weth
+    const room = model.depositRoom
+    const blocked = depositBlocked(model, acc)
+    const rows: Row[] = []
+    let error: string | undefined
+    let hood: Plan['hood']
+    let preview: Plan['preview']
+    if (!blocked && a > spendable)
+      error = asset === 'ETH' ? `More than your ETH, less ${formatWeth(GAS_RESERVE)} kept for gas.` : 'More than your WETH balance. Pay with ETH to wrap it in the same flow.'
+    if (!blocked && !error && a > 0n) {
+      try {
+        // The flow joins the whitelist before it deposits, so the preview assumes it
+        const res = simulateDeposit(s, a, true, t)
+        const after = position(res.state, t)
+        const shares = acc.shares + res.shares
+        const value = vaultToAssets(res.state, shares, t, 'floor')
+        rows.push({ label: 'You receive', after: `${formatWeth(res.shares)} YBV` })
+        rows.push({ label: 'Your position', before: formatWeth(acc.assetsAtChain), after: `${formatWeth(value)} WETH` })
+        const year = inYear(model, value, after, after.collateral + after.idle - after.debt)
+        if (year) rows.push(year)
+        rows.push({ label: 'Safety after', before: formatHealth(before.healthFactor), after: formatHealth(after.healthFactor) })
+        hood = {
+          note: res.invested
+            ? `In one transaction: a ${formatWeth(a * (s.strategy.params.targetLeverage - 1n))} WETH flash loan from the Uniswap V4 PoolManager (no fee), ${formatWeth(a * s.strategy.params.targetLeverage)} WETH supplied to Aave, and WETH borrowed from Aave to repay the flash loan.`
+            : `Below ${formatWeth(s.strategy.params.minInvestAssets, 6)} WETH the strategy keeps a deposit idle; reinvest() loops it later.`,
+          rows: [...positionRows(before, after), { label: 'Shares, previewDeposit()', after: formatWeth(res.shares, 6) }],
         }
-      }
-      return {
-        symbol: 'WETH',
-        max: wallet,
-        maxLabel: `Wallet ${formatWeth(wallet)} WETH`,
-        maxHint:
-          model.depositRoom < wallet && !blocked
-            ? `Aave's caps and the PoolManager's WETH leave room for about ${formatWeth(model.depositRoom)} WETH of deposits right now. Both are shared with other testnet users.`
-            : undefined,
-        approve: { current: acc.data.allowance, needed: a },
-        blocked,
-        error,
-        note,
-        rows,
-        after,
-        verb: 'Deposit WETH',
-        done: 'WETH deposited',
-        call: () => ({ address: d.vault, abi: vaultCallAbi, functionName: 'deposit', args: [a, account] }),
+        preview = { after, shares, supply: res.state.vault.totalSupply }
+      } catch (err) {
+        error = revertMessage(err, model)
       }
     }
-    case 'withdraw': {
-      const redeemAll = usedMax && acc.maxRedeem > 0n
-      const rows: Row[] = []
-      let error: string | undefined
-      let note: string | undefined
-      let after: Position | undefined
-      const blocked = acc.shares === 0n ? 'You hold no vault shares.' : undefined
-      if (!blocked && !redeemAll && a > acc.maxWithdraw) error = `More than you can withdraw right now: ${formatWeth(acc.maxWithdraw, 6)} WETH. Max redeems your shares instead.`
-      if (!blocked && !error && (a > 0n || redeemAll)) {
-        try {
-          const res = redeemAll ? simulateRedeem(s, acc.maxRedeem, acc.shares, t) : simulateWithdraw(s, a, acc.shares, t)
-          after = position(res.state, t)
-          rows.push({ label: 'Your shares', before: formatWeth(acc.shares, 6), after: formatWeth(acc.shares - res.shares, 6) })
-          rows.push({ label: 'WETH to your wallet', before: formatWeth(acc.data.weth), after: formatWeth(acc.data.weth + res.assets) })
-          rows.push(...positionRows(before, after))
-          note =
-            res.flashLoan > 0n
-              ? res.fullClose
-                ? `Closes the whole position: a ${formatWeth(res.flashLoan)} WETH flash loan repays all the debt, ${formatWeth(res.collateralWithdrawn)} WETH of collateral comes out, and what is left above your withdrawal stays idle in the strategy.`
-                : `A ${formatWeth(res.flashLoan)} WETH flash loan repays that much debt and ${formatWeth(res.collateralWithdrawn)} WETH of collateral comes out, so the remaining position keeps its leverage.`
-              : 'Paid from idle WETH, without touching Aave.'
-        } catch (err) {
-          error = revertMessage(err, model)
-        }
-      }
-      const shown = redeemAll ? previewRedeem(s, acc.maxRedeem, t) : a
-      return {
-        symbol: 'WETH',
-        max: acc.maxWithdraw,
-        maxLabel: `Withdrawable ${formatWeth(acc.maxWithdraw)} WETH`,
-        maxHint: redeemAll
-          ? `Max redeems ${acc.maxRedeem === acc.shares ? 'all your shares' : 'the shares the vault can pay now'} for about ${formatWeth(shown, 6)} WETH at the latest block. Equity shrinks every second at current rates, so redeeming shares avoids asking for an amount that is gone by the time the call lands.`
-          : acc.maxWithdraw < acc.assetsAtChain && acc.shares > 0n
-            ? 'Capped by what Aave and the PoolManager can pay out right now.'
-            : undefined,
-        blocked,
-        error,
-        note,
-        rows,
-        after,
-        verb: redeemAll ? 'Redeem shares' : 'Withdraw WETH',
-        done: redeemAll ? 'Shares redeemed' : 'WETH withdrawn',
-        call: () =>
-          redeemAll
-            ? { address: d.vault, abi: vaultCallAbi, functionName: 'redeem', args: [acc.maxRedeem, account, account] }
-            : { address: d.vault, abi: vaultCallAbi, functionName: 'withdraw', args: [a, account, account] },
-      }
+    const x = toInput(a, 18)
+    return {
+      symbol: asset,
+      max: spendable < room ? spendable : room,
+      balanceLabel: `Fits now: up to ${formatWeth(room, 2)}`,
+      blocked,
+      error,
+      hint: asset === 'ETH' ? `Max keeps ${formatWeth(GAS_RESERVE)} ETH back for gas.` : undefined,
+      rows,
+      hood,
+      preview,
+      steps: depositSteps({ payWith: asset, whitelisted: acc.data.whitelisted, allowance: acc.data.allowance, amount: a }),
+      defs: {
+        join: {
+          name: 'Join the whitelist',
+          what: acc.data.whitelisted ? 'Done. The vault only issues shares to listed addresses.' : 'The vault only issues shares to listed addresses; the demo operator adds yours.',
+          label: 'Join the whitelist',
+          done: 'Whitelisted',
+          call: () => ({ address: d.operator, abi: operatorAbi, functionName: 'join' }),
+        },
+        wrap: {
+          name: a > 0n ? `Wrap ${x} ETH into WETH` : 'Wrap ETH into WETH',
+          what: 'The WETH contract, deposit(): one WETH for each ETH.',
+          label: 'Wrap ETH',
+          done: 'ETH wrapped',
+          call: () => ({ address: d.weth, abi: wethAbi, functionName: 'deposit', value: a }),
+        },
+        approve: {
+          name: 'Approve the vault',
+          what: a > 0n && acc.data.allowance >= a ? 'Done. The vault may already pull this amount.' : a > 0n ? `Lets the vault pull exactly ${x} WETH.` : 'Lets the vault pull exactly the amount you deposit.',
+          label: 'Approve WETH',
+          done: 'WETH approved',
+          call: () => ({ address: d.weth, abi: wethAbi, functionName: 'approve', args: [d.vault, a] }),
+        },
+        deposit: {
+          name: 'Deposit',
+          what: 'The vault mints your shares and the strategy loops the WETH, in the same transaction.',
+          label: 'Deposit WETH',
+          done: 'WETH deposited',
+          call: () => ({ address: d.vault, abi: vaultCallAbi, functionName: 'deposit', args: [a, account] }),
+        },
+      },
+      verb: `Deposit ${x} ${asset}`,
     }
-    case 'wrap': {
-      const eth = acc.data.eth ?? 0n
-      if (unwrap) {
-        const wallet = acc.data.weth
-        return {
-          symbol: 'WETH',
-          max: wallet,
-          maxLabel: `Wallet ${formatWeth(wallet)} WETH`,
-          error: a > wallet ? 'More than your WETH balance.' : undefined,
-          rows: a > 0n ? [{ label: 'ETH in your wallet', before: formatWeth(eth), after: formatWeth(eth + a) }] : [],
-          verb: 'Unwrap WETH',
-          done: 'WETH unwrapped',
-          call: () => ({ address: d.weth, abi: wethAbi, functionName: 'withdraw', args: [a] }),
-        }
-      }
-      const max = eth > GAS_RESERVE ? eth - GAS_RESERVE : 0n
-      return {
-        symbol: 'ETH',
-        max,
-        maxLabel: `Wallet ${formatWeth(eth)} ETH`,
-        maxHint: `Max keeps ${formatWeth(GAS_RESERVE)} ETH back for gas.`,
-        error: a > eth ? 'More than your ETH balance.' : undefined,
-        rows: a > 0n ? [{ label: 'WETH in your wallet', before: formatWeth(acc.data.weth), after: formatWeth(acc.data.weth + a) }] : [],
-        verb: 'Wrap ETH',
-        done: 'ETH wrapped',
-        call: () => ({ address: d.weth, abi: wethAbi, functionName: 'deposit', value: a }),
-      }
+  }
+
+  const redeemAll = usedMax && acc.maxRedeem > 0n
+  const rows: Row[] = []
+  let error: string | undefined
+  let hood: Plan['hood']
+  let preview: Plan['preview']
+  let expected = a
+  let what = 'Paid from idle WETH, or from your share of the position with a flash loan.'
+  const blocked = acc.shares === 0n ? 'You hold no vault shares.' : undefined
+  if (!blocked && !redeemAll && a > acc.maxWithdraw) error = `More than you can withdraw right now: ${formatWeth(acc.maxWithdraw, 6)} WETH. Max redeems your shares instead.`
+  if (!blocked && !error && (a > 0n || redeemAll)) {
+    try {
+      const res = redeemAll ? simulateRedeem(s, acc.maxRedeem, acc.shares, t) : simulateWithdraw(s, a, acc.shares, t)
+      const after = position(res.state, t)
+      const shares = acc.shares - res.shares
+      expected = res.assets
+      rows.push({ label: 'You receive', after: `${formatWeth(res.assets)} ${asset}` })
+      rows.push({ label: 'Your position', before: formatWeth(acc.assetsAtChain), after: `${formatWeth(vaultToAssets(res.state, shares, t, 'floor'))} WETH` })
+      rows.push({ label: 'Safety after', before: formatHealth(before.healthFactor), after: formatHealth(after.healthFactor) })
+      const note =
+        res.flashLoan > 0n
+          ? res.fullClose
+            ? `Closes the whole position: a ${formatWeth(res.flashLoan)} WETH flash loan repays all the debt, ${formatWeth(res.collateralWithdrawn)} WETH of collateral comes out, and what is left above your withdrawal stays idle in the strategy.`
+            : `A ${formatWeth(res.flashLoan)} WETH flash loan repays that much debt and ${formatWeth(res.collateralWithdrawn)} WETH of collateral comes out, so the remaining position keeps its leverage.`
+          : 'Paid from idle WETH, without touching Aave.'
+      what = res.flashLoan > 0n ? 'A flash loan repays your share of the debt and your share of the equity comes out, in one transaction.' : note
+      hood = { note, rows: positionRows(before, after) }
+      preview = { after, shares, supply: res.state.vault.totalSupply }
+    } catch (err) {
+      error = revertMessage(err, model)
     }
+  }
+  return {
+    symbol: 'WETH',
+    max: acc.maxWithdraw,
+    balanceLabel: `Withdrawable ${formatWeth(acc.maxWithdraw)} WETH`,
+    blocked,
+    error,
+    hint: redeemAll
+      ? `Max redeems ${acc.maxRedeem === acc.shares ? 'all your shares' : 'the shares the vault can pay now'}. Equity shrinks every second at current rates, so redeeming shares avoids asking for an amount that is gone by the time the call lands.`
+      : acc.maxWithdraw < acc.assetsAtChain && acc.shares > 0n
+        ? 'Capped by what Aave and the PoolManager can pay out right now.'
+        : undefined,
+    rows,
+    hood,
+    preview,
+    steps: withdrawSteps({ redeemAll, receive: asset }),
+    defs: {
+      withdraw: {
+        name: `Withdraw ${toInput(a, 18)} WETH`,
+        what,
+        label: 'Withdraw WETH',
+        done: 'WETH withdrawn',
+        call: () => ({ address: d.vault, abi: vaultCallAbi, functionName: 'withdraw', args: [a, account, account] }),
+      },
+      redeem: {
+        name: 'Redeem all shares',
+        what,
+        label: 'Redeem shares',
+        done: 'Shares redeemed',
+        call: () => ({ address: d.vault, abi: vaultCallAbi, functionName: 'redeem', args: [acc.maxRedeem, account, account] }),
+      },
+      unwrap: {
+        name: 'Unwrap into ETH',
+        what: 'The WETH contract, withdraw(): one ETH for each WETH received.',
+        label: 'Unwrap WETH',
+        done: 'WETH unwrapped',
+        call: async () => {
+          // The redeemed amount is only known once it lands, so the unwrap never asks for more than the wallet holds
+          const balance = (await readContract(wagmiConfig, { address: d.weth, abi: wethAbi, functionName: 'balanceOf', args: [account] })) as bigint
+          return { address: d.weth, abi: wethAbi, functionName: 'withdraw', args: [expected < balance ? expected : balance] }
+        },
+      },
+    },
+    verb: redeemAll ? 'Redeem all shares' : `Withdraw ${toInput(a, 18)} WETH`,
   }
 }
 
 /* ------------------------------------------------------------------ */
-/* Actions                                                             */
+/* Action panel                                                        */
 /* ------------------------------------------------------------------ */
 
-function Actions({ model, acc }: { model: VaultModel; acc: AccountView }) {
-  const [tab, setTab] = useState<Tab>(acc.shares > 0n ? 'withdraw' : acc.data.weth > 0n ? 'deposit' : 'wrap')
+function Stepper({ plan, completed, active }: { plan: Plan; completed: StepKind[]; active: StepKind | null }) {
+  const pending = plan.steps.filter((s) => !s.done)
+  let nextShown = false
+  return (
+    <ol className="stepper" aria-label="Transactions">
+      {plan.steps.map((s) => {
+        const def = plan.defs[s.kind]!
+        const done = s.done || completed.includes(s.kind)
+        let state = done ? 'done' : s.kind === active ? 'active' : 'pending'
+        if (state === 'pending' && !active && !nextShown) {
+          state = 'next'
+          nextShown = true
+        }
+        const index = pending.findIndex((p) => p.kind === s.kind)
+        return (
+          <li key={s.kind} data-state={state}>
+            <span className="dot" aria-hidden="true">
+              {done ? '✓' : index + 1}
+            </span>
+            <span>
+              <span className="name">{def.name}</span>
+              <span className="what">{def.what}</span>
+            </span>
+            <span className="tag">{done ? 'done' : state === 'active' ? 'in wallet' : `tx ${index + 1} of ${pending.length}`}</span>
+          </li>
+        )
+      })}
+    </ol>
+  )
+}
+
+function ActionCard({ model, acc }: { model: VaultModel; acc: AccountView }) {
+  const [tab, setTab] = useState<Tab>('deposit')
   const [input, setInput] = useState('')
   const [usedMax, setUsedMax] = useState(false)
-  const [unwrap, setUnwrap] = useState(false)
-  const { run, busy } = useTx()
+  const [payWith, setPayWith] = useState<Asset>(acc.data.weth > 0n ? 'WETH' : 'ETH')
+  const [receive, setReceive] = useState<Asset>('WETH')
+  // While a flow runs, the plan it started from stays on screen: each landed step changes the balances it was built on
+  const [frozen, setFrozen] = useState<Plan | null>(null)
+  const [completed, setCompleted] = useState<StepKind[]>([])
+  const [active, setActive] = useState<StepKind | null>(null)
+  const { run } = useTx()
   const { address } = useConnection()
   const setPreview = useSetPreview()
   const amount = parseAmount(input, 18)
-  const plan = useActionPlan(model, acc, tab, amount, usedMax, unwrap, address!)
+  const asset = tab === 'deposit' ? payWith : receive
+  const live = buildPlan(model, acc, tab, amount ?? 0n, usedMax, asset, address!)
+  const plan = frozen ?? live
+  const running = frozen !== null
   const invalidInput = input !== '' && amount === null
   const noGas = acc.data.eth === 0n
   const hasAmount = (!!amount && amount > 0n) || (tab === 'withdraw' && usedMax && acc.maxRedeem > 0n)
-  const needsApproval = !!plan.approve && !!amount && plan.approve.current < plan.approve.needed
-  const canSubmit = hasAmount && !plan.blocked && !plan.error && !busy && !noGas && model.chainKnown
+  const canSubmit = hasAmount && !plan.blocked && !plan.error && !running && !noGas && model.chainKnown
+  const pending = plan.steps.filter((s) => !s.done)
 
-  const previewAfter = hasAmount && !plan.blocked && !plan.error ? plan.after : undefined
+  const previewAfter = hasAmount && !plan.blocked && !plan.error ? plan.preview : undefined
   const previewLabel = tab === 'deposit' ? 'this deposit' : 'this withdrawal'
   useEffect(() => {
-    setPreview(previewAfter ? { label: previewLabel, after: previewAfter } : null)
+    setPreview(previewAfter ? { label: previewLabel, after: previewAfter.after, share: { shares: previewAfter.shares, supply: previewAfter.supply } } : null)
   }, [previewAfter, previewLabel, setPreview])
   useEffect(() => () => setPreview(null), [setPreview])
 
@@ -334,55 +413,78 @@ function Actions({ model, acc }: { model: VaultModel; acc: AccountView }) {
 
   const submit = async () => {
     if (!address || !hasAmount) return
-    if (needsApproval && plan.approve) {
-      const needed = plan.approve.needed
-      const ok = await run('Approve WETH', 'WETH approved', () => ({
-        address: model.deployment.weth,
-        abi: wethAbi,
-        functionName: 'approve',
-        args: [model.deployment.vault, needed],
-      }))
-      if (!ok) return
+    const steps = plan.steps.filter((s) => !s.done)
+    setFrozen(plan)
+    setCompleted([])
+    for (let i = 0; i < steps.length; i++) {
+      const def = plan.defs[steps[i].kind]!
+      setActive(steps[i].kind)
+      const ok = await run(def.label, def.done, def.call, { afterApproval: i > 0, quiet: i < steps.length - 1 })
+      if (!ok) break
+      setCompleted((c) => [...c, steps[i].kind])
+      if (i === steps.length - 1) reset()
     }
-    const ok = await run(plan.verb, plan.done, plan.call, { afterApproval: needsApproval })
-    if (ok) reset()
+    setActive(null)
+    setFrozen(null)
+    setCompleted([])
   }
 
-  return (
-    <div style={{ marginTop: 22 }}>
-      <div className="tabs" role="tablist" aria-label="Action">
-        {tabs.map((t) => (
+  const assetChoice = (value: Asset, set: (a: Asset) => void, label: string) => (
+    <div className="field">
+      <div className="field-label">
+        <span>{label}</span>
+        {tab === 'deposit' ? (
+          <span>
+            Wallet {acc.data.eth !== undefined ? formatWeth(acc.data.eth) : '…'} ETH · {formatWeth(acc.data.weth)} WETH
+          </span>
+        ) : null}
+      </div>
+      <div className="choice" role="group" aria-label={label}>
+        {(['ETH', 'WETH'] as const).map((x) => (
           <button
-            key={t.id}
+            key={x}
+            className="chip"
+            aria-pressed={value === x}
+            disabled={running}
+            onClick={() => {
+              set(x)
+              setUsedMax(false)
+            }}
+          >
+            {x}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+
+  return (
+    <div className="card">
+      <div className="tabs" role="tablist" aria-label="Action">
+        {(['deposit', 'withdraw'] as const).map((t) => (
+          <button
+            key={t}
             role="tab"
             className="tab"
-            aria-selected={tab === t.id}
+            aria-selected={tab === t}
+            disabled={running}
             onClick={() => {
-              setTab(t.id)
+              setTab(t)
               reset()
             }}
           >
-            {t.label}
+            {t === 'deposit' ? 'Deposit' : 'Withdraw'}
           </button>
         ))}
       </div>
 
       <div className="action" role="tabpanel">
-        {tab === 'wrap' ? (
-          <div className="choice" aria-label="Direction">
-            <button className="chip" aria-pressed={!unwrap} onClick={() => (setUnwrap(false), reset())}>
-              ETH to WETH
-            </button>
-            <button className="chip" aria-pressed={unwrap} onClick={() => (setUnwrap(true), reset())}>
-              WETH to ETH
-            </button>
-          </div>
-        ) : null}
+        {tab === 'deposit' ? assetChoice(payWith, setPayWith, 'Pay with') : null}
 
         <div className="field">
           <label className="field-label" htmlFor="amount">
             <span>Amount</span>
-            <span>{plan.maxLabel}</span>
+            <span>{plan.balanceLabel}</span>
           </label>
           <div className="input-wrap" data-invalid={invalidInput || (hasAmount && !!(plan.blocked ?? plan.error))}>
             <input
@@ -392,15 +494,16 @@ function Actions({ model, acc }: { model: VaultModel; acc: AccountView }) {
               autoComplete="off"
               placeholder="0.00"
               value={input}
+              disabled={running}
               onChange={(e) => {
                 setInput(e.target.value)
                 setUsedMax(false)
               }}
             />
-            <span className="unit">{plan.symbol}</span>
+            <span className="unit">{tab === 'deposit' ? payWith : 'WETH'}</span>
             <button
               className="max"
-              disabled={plan.max === 0n}
+              disabled={plan.max === 0n || running}
               onClick={() => {
                 setInput(toInput(tab === 'withdraw' ? previewRedeem(model.state, acc.maxRedeem, model.chainTime) : plan.max, 18))
                 setUsedMax(true)
@@ -419,25 +522,31 @@ function Actions({ model, acc }: { model: VaultModel; acc: AccountView }) {
               {plan.blocked ?? plan.error}
             </span>
           ) : null}
-          {plan.maxHint ? <span className="hint">{plan.maxHint}</span> : null}
+          {plan.hint && usedMax ? <span className="hint">{plan.hint}</span> : null}
         </div>
 
-        {plan.note && previewAfter ? <div className="callout">{plan.note}</div> : null}
+        {tab === 'withdraw' ? assetChoice(receive, setReceive, 'Receive as') : null}
 
         {hasAmount && !plan.blocked && !plan.error && plan.rows.length > 0 ? (
           <dl className="rows">
             {plan.rows.map((r) => (
               <div className="row" key={r.label}>
                 <dt>{r.label}</dt>
-                <dd>
-                  <span className="faint">{r.before}</span>
-                  <span className="arrow">to</span>
+                <dd className={r.tone === 'danger' ? 'tone-danger' : undefined}>
+                  {r.before !== undefined ? (
+                    <>
+                      <span className="faint">{r.before}</span>
+                      <span className="arrow">→</span>
+                    </>
+                  ) : null}
                   {r.after}
                 </dd>
               </div>
             ))}
           </dl>
         ) : null}
+
+        {!plan.blocked ? <Stepper plan={plan} completed={completed} active={active} /> : null}
 
         {noGas ? (
           <div className="callout" data-tone="warn">
@@ -450,42 +559,35 @@ function Actions({ model, acc }: { model: VaultModel; acc: AccountView }) {
         ) : null}
 
         <button className="btn btn-primary btn-block" disabled={!canSubmit} onClick={submit}>
-          {busy ?? (needsApproval ? `Approve and ${plan.verb.charAt(0).toLowerCase()}${plan.verb.slice(1)}` : plan.verb)}
+          {running && active ? `${plan.defs[active]!.label}…` : hasAmount ? plan.verb : 'Enter an amount'}
         </button>
-        {needsApproval && canSubmit ? <p className="hint">Two transactions: an approval for this amount, then the deposit itself.</p> : null}
-      </div>
-    </div>
-  )
-}
+        {pending.length > 1 && canSubmit ? <p className="hint">{pending.length} transactions: your wallet asks for each one in turn.</p> : null}
 
-/* ------------------------------------------------------------------ */
-/* Whitelist                                                           */
-/* ------------------------------------------------------------------ */
-
-function JoinWhitelist({ model }: { model: VaultModel }) {
-  const { run, busy } = useTx()
-  if (!model.shock.ownsRoles) {
-    return (
-      <div className="callout" data-tone="warn">
-        This address is not on the whitelist, and the demo operator no longer holds the owner role, so only the owner can add it.
+        {plan.hood && hasAmount && !plan.blocked && !plan.error ? (
+          <details className="hood">
+            <summary>Under the hood</summary>
+            <div className="hood-body">
+              <p>{plan.hood.note}</p>
+              <dl className="rows">
+                {plan.hood.rows.map((r) => (
+                  <div className="row" key={r.label}>
+                    <dt>{r.label}</dt>
+                    <dd>
+                      {r.before !== undefined ? (
+                        <>
+                          <span className="faint">{r.before}</span>
+                          <span className="arrow">→</span>
+                        </>
+                      ) : null}
+                      {r.after}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          </details>
+        ) : null}
       </div>
-    )
-  }
-  return (
-    <div className="callout">
-      <p style={{ marginBottom: 10 }}>
-        <strong style={{ color: 'var(--ink)' }}>The vault only issues shares to whitelisted addresses.</strong> On this testnet the
-        owner role sits with a demo contract that lets anyone add their own address.
-      </p>
-      <button
-        className="btn btn-primary"
-        disabled={!!busy}
-        onClick={() =>
-          run('Join the whitelist', 'Whitelisted', () => ({ address: model.deployment.operator, abi: operatorAbi, functionName: 'join' }))
-        }
-      >
-        {busy ?? 'Join the whitelist'}
-      </button>
     </div>
   )
 }
@@ -513,20 +615,19 @@ function GetStarted({ model }: { model: VaultModel }) {
         </div>
         <div className="flow-step">
           <b>2</b>
-          <span>Connect your wallet and add your address to the vault's whitelist.</span>
+          <span>Connect your wallet.</span>
         </div>
         <div className="flow-step">
           <b>3</b>
           <span>
-            Wrap some ETH and deposit it: the strategy loops it {model.live.strategy.targetLeverage.toString()} times on Aave in the
-            same transaction.
+            Deposit some ETH. The panel joins the whitelist, wraps, approves and deposits, and the strategy loops it{' '}
+            {model.live.strategy.targetLeverage.toString()} times on Aave.
           </span>
         </div>
         <div className="flow-step">
           <b>4</b>
           <span>
-            Run the <Link href="/emergency">emergency cycle</Link>: shock the thresholds, close the position with checkHealth(),
-            then restore and reinvest.
+            Run the <Link href="/stress-test">stress test</Link>: watch the vault exit before liquidation, then bring it back.
           </span>
         </div>
       </div>
@@ -535,13 +636,13 @@ function GetStarted({ model }: { model: VaultModel }) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Card                                                                */
+/* Side column                                                         */
 /* ------------------------------------------------------------------ */
 
-export function AccountCard({ model, onConnect, onFaucet }: { model: VaultModel; onConnect: () => void; onFaucet: () => void }) {
+/** The vault page's right column: the visitor's position and the action panel, in view while the left column scrolls. */
+export function AccountSide({ model, onConnect, onFaucet }: { model: VaultModel; onConnect: () => void; onFaucet: () => void }) {
   const { status, chainId } = useConnection()
   const acc = model.account
-  const empty = useMemo(() => !!acc && acc.shares === 0n && acc.data.weth === 0n, [acc])
 
   if (status !== 'connected') {
     return (
@@ -554,7 +655,7 @@ export function AccountCard({ model, onConnect, onFaucet }: { model: VaultModel;
             <p>
               <strong>Connect a wallet to deposit or withdraw.</strong> You can read the whole vault without one.
             </p>
-            <p>The vault takes {chain.name} WETH. Get test ETH from a faucet, then wrap it here.</p>
+            <p>The vault takes {chain.name} WETH; the panel wraps ETH for you. Get test ETH from a faucet.</p>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <button className="btn btn-primary" onClick={onConnect}>
                 Connect wallet
@@ -570,45 +671,21 @@ export function AccountCard({ model, onConnect, onFaucet }: { model: VaultModel;
     )
   }
 
-  if (chainId !== chain.id) {
+  if (chainId !== chain.id || !acc) {
     return (
       <div className="card">
         <div className="card-title">
           <h2>Your position</h2>
         </div>
-        <p className="muted">Your wallet is on another network. Switch to {chain.name} from the button at the top.</p>
-      </div>
-    )
-  }
-
-  if (!acc) {
-    return (
-      <div className="card">
-        <div className="card-title">
-          <h2>Your position</h2>
-        </div>
-        <p className="muted">Reading your position…</p>
+        <p className="muted">{chainId !== chain.id ? `Your wallet is on another network. Switch to ${chain.name} from the button at the top.` : 'Reading your position…'}</p>
       </div>
     )
   }
 
   return (
-    <div className="card">
-      <div className="card-title">
-        <h2>Your position</h2>
-        {empty ? (
-          <button className="link-button" onClick={onFaucet}>
-            Get test ETH
-          </button>
-        ) : null}
-      </div>
-      <PositionSummary model={model} acc={acc} />
-      {!acc.data.whitelisted ? (
-        <div style={{ marginTop: 18 }}>
-          <JoinWhitelist model={model} />
-        </div>
-      ) : null}
-      <Actions model={model} acc={acc} />
-    </div>
+    <>
+      <PositionCard model={model} acc={acc} />
+      <ActionCard model={model} acc={acc} />
+    </>
   )
 }

@@ -16,20 +16,11 @@ test('captures the pages at desktop and phone widths, light and dark', async ({ 
   await page.goto('/')
   await page.getByRole('banner').getByRole('button', { name: 'Connect wallet' }).click()
   await page.getByRole('dialog', { name: 'Connect a wallet' }).getByRole('button').filter({ hasText: /mock/i }).click()
-  // The account reads first, so the join step is only shown once whitelist status is known
+  // The account reads first, so the flow is only shown once the balances are known
   await expect(page.locator('.row dt', { hasText: 'Wallet' })).toBeVisible()
-  const join = page.getByRole('button', { name: 'Join the whitelist' })
-  if (await join.isVisible()) {
-    await join.click()
-    await expect(page.locator('.toast-title', { hasText: 'Whitelisted' })).toBeVisible()
-  }
-  await page.getByRole('tab', { name: 'Wrap ETH' }).click()
-  await page.locator('#amount').fill('1')
-  await page.getByRole('button', { name: 'Wrap ETH', exact: true }).click()
-  await expect(page.locator('.toast-title', { hasText: 'ETH wrapped' })).toBeVisible()
-  await page.getByRole('tab', { name: 'Deposit' }).click()
+  await page.getByRole('group', { name: 'Pay with' }).getByRole('button', { name: 'ETH', exact: true }).click()
   await page.locator('#amount').fill('0.5')
-  await page.getByRole('button', { name: /deposit weth/i }).click()
+  await page.getByRole('button', { name: 'Deposit 0.5 ETH' }).click()
   await expect(page.locator('.toast-title', { hasText: 'WETH deposited' })).toBeVisible()
   // A typed amount, so the drawing shows its preview outline
   await page.locator('#amount').fill('0.25')
@@ -38,8 +29,8 @@ test('captures the pages at desktop and phone widths, light and dark', async ({ 
     for (const scheme of ['light', 'dark'] as const) {
       await page.setViewportSize({ width, height: 900 })
       await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'reduce' })
-      for (const [name, path] of [['vault', '/'], ['emergency', '/emergency'], ['how', '/how-it-works']] as const) {
-        await page.getByRole('navigation', { name: 'Pages' }).getByRole('link', { name: { vault: 'Vault', emergency: 'Emergency', how: 'How it works' }[name], exact: true }).click()
+      for (const [name, path] of [['vault', '/'], ['stress', '/stress-test'], ['how', '/how-it-works']] as const) {
+        await page.getByRole('navigation', { name: 'Pages' }).getByRole('link', { name: { vault: 'Vault', stress: 'Stress test', how: 'How it works' }[name], exact: true }).click()
         await expect(page).toHaveURL(new RegExp(`${path}$`))
         await page.waitForTimeout(400)
         await page.screenshot({ path: `test-results/screens/${name}-${width}-${scheme}.png`, fullPage: true })
