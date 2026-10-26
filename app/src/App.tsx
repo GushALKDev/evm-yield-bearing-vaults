@@ -3,6 +3,7 @@ import { AccountSide } from './components/Account'
 import { VaultDetails } from './components/Details'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { FaucetDialog } from './components/FaucetDialog'
+import { LegalNotice } from './components/Legal'
 import { Footer, Header, HowItWorks, Notice } from './components/Sections'
 import { StressTest } from './components/StressTest'
 import { Toasts } from './components/Toasts'
@@ -44,7 +45,9 @@ function Vault() {
     <>
       <Header page={page} onConnect={openConnect} onFaucet={() => setFaucetOpen(true)} />
       <Notice />
-      {model ? (
+      {page === 'legal' ? (
+        <LegalNotice />
+      ) : model ? (
         <main>
           {page === 'vault' ? (
             <>

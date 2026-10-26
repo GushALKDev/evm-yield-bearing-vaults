@@ -74,6 +74,7 @@ notice        one line: testnet, for educational purposes, not audited, anyone c
 /stress-test  head, the four-step cycle with only the current step open, the loop (left) | the state card (right)
               /emergency, its old path, opens it too
 /how-it-works six mechanics + what runs here and what is a stand-in
+/legal        legal notice: owner (LSSI-CE), purpose, liability, data and cookies; linked from the footer only
 
 footer
 ```

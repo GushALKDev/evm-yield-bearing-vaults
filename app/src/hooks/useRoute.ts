@@ -1,12 +1,15 @@
 import { useSyncExternalStore } from 'react'
 
-export type Page = 'vault' | 'stress' | 'how'
+export type Page = 'vault' | 'stress' | 'how' | 'legal'
 
 export const pages: { page: Page; path: string; label: string }[] = [
   { page: 'vault', path: '/', label: 'Vault' },
   { page: 'stress', path: '/stress-test', label: 'Stress test' },
   { page: 'how', path: '/how-it-works', label: 'How it works' },
 ]
+
+/** Linked from the footer only, so it stays out of the header's page list. */
+export const LEGAL_PATH = '/legal'
 
 function subscribe(onChange: () => void) {
   window.addEventListener('popstate', onChange)
@@ -35,6 +38,7 @@ const aliases: Record<string, Page> = { '/emergency': 'stress' }
 /** The page for a URL. Unknown paths show the vault: the host serves index.html for every path. */
 export function pageFor(url: string): Page {
   const path = url.split('#')[0].replace(/\/+$/, '') || '/'
+  if (path === LEGAL_PATH) return 'legal'
   return pages.find((p) => p.path === path)?.page ?? aliases[path] ?? 'vault'
 }
 
