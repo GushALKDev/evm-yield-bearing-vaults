@@ -11,9 +11,9 @@ A modular ERC-4626 vault with pluggable strategies. The repository contains a si
 
 **Demo app:** a web interface in [`app/`](./app/README.md) runs the vault on Base Sepolia against the real Aave V3 and Uniswap V4 deployments: deposit, withdraw and run the exit-before-liquidation cycle, with previews computed by the contracts' and Aave's own math.
 
-**Live demo:** https://vaults-poc.gushalk.workers.dev
+**Live demo:** https://vaults-poc.tesselium.com
 
-[![The demo app's vault page with a connected position: the net APY, the loop and the deposit flow, read live from Base Sepolia](docs/images/demo-app.png)](https://vaults-poc.gushalk.workers.dev)
+[![The demo app's vault page with a connected position: the net APY, the loop and the deposit flow, read live from Base Sepolia](docs/images/demo-app.png)](https://vaults-poc.tesselium.com)
 
 ---
 
@@ -30,7 +30,7 @@ A modular ERC-4626 vault with pluggable strategies. The repository contains a si
 
 ## Demo app
 
-A web app (`app/`) runs the vault on Base Sepolia against the real Aave V3 pool, Uniswap V4 PoolManager and WETH of that testnet, with the test suite's parameters. Visitors can deposit testnet WETH, watch the loop as Aave holds it (collateral and idle WETH against debt and equity, projected to the second, with the health factor against its thresholds), withdraw, and run the emergency cycle themselves on a stress test page: a testnet-only contract, `DemoOperator`, holds the owner and admin roles and lets anyone join the whitelist, shock the thresholds above the live health factor, restore and reinvest. The previews are mirrored from the contracts and Aave with their rounding and checked against a Base Sepolia fork to the wei. How it is built, what the stand-in does and does not check, and how to deploy it: [app/README.md](./app/README.md). Live at https://vaults-poc.gushalk.workers.dev.
+A web app (`app/`) runs the vault on Base Sepolia against the real Aave V3 pool, Uniswap V4 PoolManager and WETH of that testnet, with the test suite's parameters. Visitors can deposit testnet WETH, watch the loop as Aave holds it (collateral and idle WETH against debt and equity, projected to the second, with the health factor against its thresholds), withdraw, and run the emergency cycle themselves on a stress test page: a testnet-only contract, `DemoOperator`, holds the owner and admin roles and lets anyone join the whitelist, shock the thresholds above the live health factor, restore and reinvest. The previews are mirrored from the contracts and Aave with their rounding and checked against a Base Sepolia fork to the wei. How it is built, what the stand-in does and does not check, and how to deploy it: [app/README.md](./app/README.md). Live at https://vaults-poc.tesselium.com.
 
 ---
 
