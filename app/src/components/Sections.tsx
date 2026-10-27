@@ -202,7 +202,7 @@ export function Footer({ model }: { model: VaultModel | null }) {
           </a>
           {model ? (
             <a href={explorerAddress(model.deployment.vault)} target="_blank" rel="noreferrer">
-              Vault contract
+              Contract
             </a>
           ) : null}
           <span>
@@ -215,7 +215,7 @@ export function Footer({ model }: { model: VaultModel | null }) {
               Tesselium Labs
             </a>
           </span>
-          <Link href={LEGAL_PATH}>Legal notice</Link>
+          <Link href={LEGAL_PATH}>Legal</Link>
         </nav>
       </div>
     </footer>
