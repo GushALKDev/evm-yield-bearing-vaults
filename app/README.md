@@ -168,7 +168,7 @@ FOUNDRY_PROFILE=testnet forge test
 The app runs as `vaults-poc`, an assets-only Worker: there is no Worker script. `wrangler.jsonc` points it at `dist/`
 and holds the SPA fallback, which serves `index.html` for every page path (`/stress-test`, `/how-it-works`, and `/emergency`, the stress test's
 old path, which still opens it).
-`public/_headers` holds the cache and security headers; Vite copies it into `dist/`.
+`public/_headers` holds the security headers; Vite copies it into `dist/`.
 
 First deploy, from a terminal in `app/`:
 
