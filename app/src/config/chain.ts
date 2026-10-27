@@ -30,6 +30,7 @@ export const links = {
   docs: 'https://github.com/GushALKDev/evm-yield-bearing-vaults/blob/main/docs/01-architecture.md',
   economics: 'https://github.com/GushALKDev/evm-yield-bearing-vaults/blob/main/docs/02-economics.md',
   author: 'https://www.linkedin.com/in/gustavomaral/',
+  tesselium: 'https://tesselium.com',
   ethFaucet: 'https://docs.base.org/base-chain/network-information/network-faucets',
 }
 
