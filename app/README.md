@@ -169,6 +169,8 @@ The app runs as `vaults-poc`, an assets-only Worker: there is no Worker script. 
 and holds the SPA fallback, which serves `index.html` for every page path (`/stress-test`, `/how-it-works`, and `/emergency`, the stress test's
 old path, which still opens it).
 `public/_headers` holds the security headers; Vite copies it into `dist/`.
+The build also copies the interactive diagrams of `docs/diagrams/` into `dist/diagrams/`, served at
+`/diagrams/architecture.html` and `/diagrams/deposit-withdraw.html`.
 
 First deploy, from a terminal in `app/`:
 

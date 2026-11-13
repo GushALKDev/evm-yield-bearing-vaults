@@ -7,7 +7,7 @@
   "license": "MIT",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && mkdir -p dist/diagrams && cp ../docs/diagrams/*.html dist/diagrams/",
     "preview": "vite preview",
     "deploy": "npm run build && wrangler deploy",
     "test": "vitest run",
