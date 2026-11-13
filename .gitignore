@@ -33,3 +33,6 @@ node_modules/
 # Foundry
 .foundry/
 .qd/
+
+# Archify working files (candidates, receipts, captures)
+.archify/
