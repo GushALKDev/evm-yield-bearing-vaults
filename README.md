@@ -71,6 +71,15 @@ A web app (`app/`) runs the vault on Base Sepolia against the real Aave V3 pool,
 | `WETHLoopStrategy` | Leveraged WETH through Uniswap V4 flash loans and Aave V3 E-Mode |
 | `AaveAdapter`, `UniswapV4Adapter` | Aave V3 supply, withdraw, borrow and repay; flash loans through `unlock` / `unlockCallback` |
 
+<a href="./docs/diagrams/architecture.html">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/architecture-dark.png">
+    <img src="docs/images/architecture.png" alt="Contract architecture: the depositor, owner and admin around the vault, the two strategies, the Aave and Uniswap V4 adapters and the external protocols">
+  </picture>
+</a>
+
+The interactive version, with every node linked to its source lines, is [`docs/diagrams/architecture.html`](./docs/diagrams/architecture.html); open it in a browser after cloning.
+
 Every contract, the role matrix and the step-by-step flows: [Guide 1: Architecture and Flows](./docs/01-architecture.md).
 
 ---
@@ -84,6 +93,15 @@ Every contract, the role matrix and the step-by-step flows: [Guide 1: Architectu
 **Emergency and recovery.** Emergency mode starts from `checkHealth()` or the admin and closes the position with a flash loan for the whole debt. If the exit fails, emergency mode stays on and withdrawals deleverage proportionally. Recovery takes two admin steps: clearing the flags, then `reinvest()`, which reverts unless the rebuilt position reaches `targetHealthFactor`.
 
 The tests run at 10x. With the E-Mode LTV of 93% at the pinned block, Aave accepts a fresh position at 14x and rejects one at 15x.
+
+The calls of a deposit and a withdrawal through the loop, in order (interactive version: [`docs/diagrams/deposit-withdraw.html`](./docs/diagrams/deposit-withdraw.html)):
+
+<a href="./docs/diagrams/deposit-withdraw.html">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/deposit-withdraw-dark.png">
+    <img src="docs/images/deposit-withdraw.png" width="600" alt="Sequence of a deposit and a withdrawal: the vault, WETHLoopStrategy, the Uniswap V4 flash loan and the Aave V3 supply, borrow, repay and withdraw calls">
+  </picture>
+</a>
 
 ---
 
@@ -113,7 +131,7 @@ src/              protocol contracts (vaults, strategies, adapters, access)
 test/             protocol tests: unit, fork integration, fuzz, invariants, gas benchmarks
 script/testnet/   Base Sepolia deployment (DeployTestnet), the testnet-only DemoOperator, their tests
 app/              demo app (React, viem, wagmi), its parity and end-to-end suites
-docs/             guides: architecture, economics, security, review notes
+docs/             guides: architecture, economics, security, review notes; architecture and sequence diagrams
 ```
 
 ---

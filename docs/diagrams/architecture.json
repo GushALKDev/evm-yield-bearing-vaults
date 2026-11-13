@@ -1,0 +1,443 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Contract Architecture",
+    "locale": "en",
+    "output": "docs/diagrams/architecture.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/GushALKDev/evm-yield-bearing-vaults.git",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "cf67a2381dd0543f9aa97fb96a2c9eedda53c462"
+    }
+  },
+  "components": [
+    {
+      "id": "owner",
+      "type": "security",
+      "label": "Owner",
+      "sublabel": "vault Ownable",
+      "pos": [
+        40,
+        60
+      ],
+      "size": [
+        140,
+        64
+      ],
+      "sources": [
+        {
+          "path": "src/access/Whitelist.sol",
+          "line": 58,
+          "end_line": 118,
+          "label": "onlyOwner functions"
+        }
+      ]
+    },
+    {
+      "id": "depositor",
+      "type": "external",
+      "label": "Depositor",
+      "sublabel": "whitelisted address",
+      "pos": [
+        40,
+        213
+      ],
+      "size": [
+        140,
+        64
+      ],
+      "icon": "person",
+      "sources": [
+        {
+          "path": "src/base/BaseVault.sol",
+          "line": 230,
+          "end_line": 265,
+          "label": "deposit/mint/withdraw/redeem"
+        }
+      ]
+    },
+    {
+      "id": "admin",
+      "type": "security",
+      "label": "Admin",
+      "sublabel": "vault admin",
+      "pos": [
+        40,
+        380
+      ],
+      "size": [
+        140,
+        64
+      ],
+      "sources": [
+        {
+          "path": "src/base/BaseVault.sol",
+          "line": 136,
+          "end_line": 212,
+          "label": "onlyAdmin functions"
+        },
+        {
+          "path": "src/strategies/WETHLoopStrategy.sol",
+          "line": 161,
+          "end_line": 175,
+          "label": "onlyVaultAdmin"
+        }
+      ]
+    },
+    {
+      "id": "whitelist",
+      "type": "security",
+      "label": "Whitelist",
+      "sublabel": "isWhitelisted[address]",
+      "pos": [
+        330,
+        60
+      ],
+      "size": [
+        180,
+        64
+      ],
+      "sources": [
+        {
+          "path": "src/access/Whitelist.sol",
+          "line": 31,
+          "end_line": 52,
+          "label": "storage and onlyWhitelisted"
+        },
+        {
+          "path": "src/base/BaseVault.sol",
+          "line": 457,
+          "end_line": 473,
+          "label": "fee recipient and transfers"
+        }
+      ]
+    },
+    {
+      "id": "vault",
+      "type": "backend",
+      "label": "YieldBearingVault",
+      "sublabel": "ERC-4626 · BaseVault",
+      "tag": "HWM fee · emergency",
+      "pos": [
+        330,
+        200
+      ],
+      "size": [
+        180,
+        90
+      ],
+      "sources": [
+        {
+          "path": "src/vaults/YieldBearingVault.sol",
+          "line": 17,
+          "end_line": 20
+        },
+        {
+          "path": "src/base/BaseVault.sol",
+          "line": 321,
+          "end_line": 364,
+          "label": "_deposit / _withdraw"
+        },
+        {
+          "path": "src/base/BaseVault.sol",
+          "line": 146,
+          "end_line": 196,
+          "label": "strategy and emergency"
+        }
+      ]
+    },
+    {
+      "id": "aaveStrategy",
+      "type": "backend",
+      "label": "AaveSimpleLendingStrategy",
+      "sublabel": "Aave supply, no leverage",
+      "tag": "BaseStrategy",
+      "pos": [
+        670,
+        60
+      ],
+      "size": [
+        210,
+        72
+      ],
+      "sources": [
+        {
+          "path": "src/strategies/AaveSimpleLendingStrategy.sol",
+          "line": 62,
+          "end_line": 96,
+          "label": "_invest / _divest / _exitPosition"
+        },
+        {
+          "path": "src/base/BaseStrategy.sol",
+          "line": 113,
+          "end_line": 165,
+          "label": "ERC-4626 onlyVault"
+        }
+      ]
+    },
+    {
+      "id": "loopStrategy",
+      "type": "backend",
+      "label": "WETHLoopStrategy",
+      "sublabel": "leveraged loop · E-Mode",
+      "tag": "BaseStrategy",
+      "pos": [
+        670,
+        360
+      ],
+      "size": [
+        210,
+        72
+      ],
+      "sources": [
+        {
+          "path": "src/strategies/WETHLoopStrategy.sol",
+          "line": 193,
+          "end_line": 280,
+          "label": "_invest / _divest"
+        },
+        {
+          "path": "src/strategies/WETHLoopStrategy.sol",
+          "line": 345,
+          "end_line": 359,
+          "label": "checkHealth"
+        },
+        {
+          "path": "src/base/BaseStrategy.sol",
+          "line": 201,
+          "end_line": 221,
+          "label": "setEmergencyMode"
+        }
+      ]
+    },
+    {
+      "id": "aaveAdapter",
+      "type": "backend",
+      "label": "AaveAdapter",
+      "sublabel": "internal library",
+      "pos": [
+        1030,
+        210
+      ],
+      "size": [
+        180,
+        70
+      ],
+      "sources": [
+        {
+          "path": "src/adapters/AaveAdapter.sol",
+          "line": 20,
+          "end_line": 61
+        }
+      ]
+    },
+    {
+      "id": "uniAdapter",
+      "type": "backend",
+      "label": "UniswapV4Adapter",
+      "sublabel": "flash loan (base contract)",
+      "pos": [
+        1030,
+        500
+      ],
+      "size": [
+        180,
+        70
+      ],
+      "sources": [
+        {
+          "path": "src/adapters/UniswapV4Adapter.sol",
+          "line": 53,
+          "end_line": 89
+        }
+      ]
+    },
+    {
+      "id": "aavePool",
+      "type": "external",
+      "label": "Aave V3 Pool",
+      "sublabel": "aWETH · variable debt",
+      "pos": [
+        1370,
+        210
+      ],
+      "size": [
+        170,
+        70
+      ],
+      "sources": [
+        {
+          "path": "src/utils/Constants.sol",
+          "line": 22,
+          "end_line": 27
+        },
+        {
+          "path": "src/interfaces/aave/IPool.sol",
+          "line": 23,
+          "end_line": 36
+        }
+      ]
+    },
+    {
+      "id": "poolManager",
+      "type": "external",
+      "label": "Uniswap V4",
+      "sublabel": "PoolManager",
+      "pos": [
+        1370,
+        500
+      ],
+      "size": [
+        170,
+        70
+      ],
+      "sources": [
+        {
+          "path": "src/utils/Constants.sol",
+          "line": 31
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "YieldBearingVault contract",
+      "wraps": [
+        "whitelist",
+        "vault"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "External protocols",
+      "wraps": [
+        "aavePool",
+        "poolManager"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "user-deposit",
+      "from": "depositor",
+      "to": "vault",
+      "label": "deposit / withdraw",
+      "variant": "emphasis"
+    },
+    {
+      "id": "owner-whitelist",
+      "from": "owner",
+      "to": "whitelist",
+      "label": "add / remove",
+      "variant": "security"
+    },
+    {
+      "id": "whitelist-gate",
+      "from": "whitelist",
+      "to": "vault",
+      "label": "onlyWhitelisted",
+      "variant": "security"
+    },
+    {
+      "id": "admin-vault",
+      "from": "admin",
+      "to": "vault",
+      "label": "onlyAdmin",
+      "variant": "security"
+    },
+    {
+      "id": "vault-aave",
+      "from": "vault",
+      "to": "aaveStrategy",
+      "label": "deposit / withdraw",
+      "variant": "emphasis"
+    },
+    {
+      "id": "vault-loop",
+      "from": "vault",
+      "to": "loopStrategy",
+      "label": "deposit / withdraw",
+      "variant": "emphasis"
+    },
+    {
+      "id": "loop-emergency",
+      "from": "loopStrategy",
+      "to": "vault",
+      "label": "activateEmergencyMode",
+      "variant": "dashed"
+    },
+    {
+      "id": "aave-supply",
+      "from": "aaveStrategy",
+      "to": "aaveAdapter",
+      "label": "supply / withdraw"
+    },
+    {
+      "id": "loop-aave",
+      "from": "loopStrategy",
+      "to": "aaveAdapter",
+      "label": "supply · borrow · repay"
+    },
+    {
+      "id": "loop-flash",
+      "from": "loopStrategy",
+      "to": "uniAdapter",
+      "label": "flashLoan"
+    },
+    {
+      "id": "adapter-pool",
+      "from": "aaveAdapter",
+      "to": "aavePool",
+      "label": "IPool"
+    },
+    {
+      "id": "flash-unlock",
+      "from": "uniAdapter",
+      "to": "poolManager",
+      "label": "unlock / settle"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "Access control",
+      "items": [
+        "Owner: manages the whitelist; renounceOwnership() always reverts and the fee recipient cannot be removed",
+        "Admin: setStrategy, setEmergencyMode, reinvest, setProtocolFee (max 25%), setFeeRecipient; on the strategy, setLeverage and setHealthFactors",
+        "Strategies accept deposit, withdraw, reinvest and setEmergencyMode only from their VAULT (onlyVault)",
+        "The whitelist applies to the receiver of deposit and mint and to the recipient of every share transfer"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Emergency",
+      "items": [
+        "Anyone can call checkHealth(); below minHealthFactor the strategy calls vault.activateEmergencyMode()",
+        "The vault forwards the flag with strategy.setEmergencyMode(true), which closes the position through exitPosition() inside try/catch",
+        "While emergency mode is active, deposits and mints revert; withdrawals keep working"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Composition",
+      "items": [
+        "The vault has a single active strategy (setStrategy); both implementations are shown here",
+        "AaveAdapter is a library of internal functions, compiled into each strategy",
+        "UniswapV4Adapter is a base contract of WETHLoopStrategy and receives unlockCallback from the PoolManager"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Accounting",
+      "items": [
+        "Performance fee above the high-water mark, paid by minting shares to the fee recipient",
+        "1,000 wei of dead shares in the vault constructor; strategies use a decimals offset of 6",
+        "Loop totalAssets() = collateral + idle WETH − debt − outstanding flash loan"
+      ]
+    }
+  ]
+}

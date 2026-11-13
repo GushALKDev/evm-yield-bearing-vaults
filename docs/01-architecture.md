@@ -7,6 +7,15 @@
 
 ## Contracts
 
+<a href="./diagrams/architecture.html">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./images/architecture-dark.png">
+    <img src="./images/architecture.png" alt="Contract architecture: the depositor, owner and admin around the vault, the two strategies, the Aave and Uniswap V4 adapters and the external protocols">
+  </picture>
+</a>
+
+Interactive version, with every node linked to its source lines: [`diagrams/architecture.html`](./diagrams/architecture.html). Its source is [`diagrams/architecture.json`](./diagrams/architecture.json).
+
 | Contract | Description |
 |----------|-------------|
 | `YieldBearingVault` | Concrete vault ("YieldBearingVault", "YBV") built on `BaseVault` |
@@ -34,6 +43,15 @@
 Uniswap V4 charged no flash loan fee at the time of writing. Aave V3's flash loan premium was 0.05% at the time of writing (`FLASHLOAN_PREMIUM_TOTAL = 5` bps at block 26043110). Neither value is fixed.
 
 ## WETHLoopStrategy flow
+
+The calls of a deposit and a withdrawal, in order. Interactive version: [`diagrams/deposit-withdraw.html`](./diagrams/deposit-withdraw.html); source: [`diagrams/deposit-withdraw.json`](./diagrams/deposit-withdraw.json).
+
+<a href="./diagrams/deposit-withdraw.html">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./images/deposit-withdraw-dark.png">
+    <img src="./images/deposit-withdraw.png" width="600" alt="Sequence of a deposit and a withdrawal: the vault, WETHLoopStrategy, the Uniswap V4 flash loan and the Aave V3 supply, borrow, repay and withdraw calls">
+  </picture>
+</a>
 
 ### Investment (leverage loop)
 

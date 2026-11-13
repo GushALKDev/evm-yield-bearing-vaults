@@ -1,0 +1,352 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "Deposit and Withdraw through WETHLoopStrategy",
+    "locale": "en",
+    "output": "docs/diagrams/deposit-withdraw.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/GushALKDev/evm-yield-bearing-vaults.git",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "cf67a2381dd0543f9aa97fb96a2c9eedda53c462"
+    }
+  },
+  "participants": [
+    {
+      "id": "user",
+      "type": "external",
+      "label": "Depositor",
+      "sublabel": "whitelisted",
+      "icon": "person",
+      "sources": [
+        {
+          "path": "src/access/Whitelist.sol",
+          "line": 43,
+          "end_line": 52,
+          "label": "onlyWhitelisted"
+        }
+      ]
+    },
+    {
+      "id": "vault",
+      "type": "backend",
+      "label": "YieldBearingVault",
+      "sublabel": "ERC-4626",
+      "sources": [
+        {
+          "path": "src/base/BaseVault.sol",
+          "line": 230,
+          "end_line": 256,
+          "label": "deposit / withdraw"
+        },
+        {
+          "path": "src/base/BaseVault.sol",
+          "line": 321,
+          "end_line": 364,
+          "label": "_deposit / _withdraw"
+        }
+      ]
+    },
+    {
+      "id": "strategy",
+      "type": "backend",
+      "label": "WETHLoopStrategy",
+      "sublabel": "BaseStrategy",
+      "sources": [
+        {
+          "path": "src/base/BaseStrategy.sol",
+          "line": 113,
+          "end_line": 154,
+          "label": "deposit / withdraw onlyVault"
+        },
+        {
+          "path": "src/strategies/WETHLoopStrategy.sol",
+          "line": 193,
+          "end_line": 280,
+          "label": "_invest / _divest"
+        },
+        {
+          "path": "src/strategies/WETHLoopStrategy.sol",
+          "line": 285,
+          "end_line": 328,
+          "label": "flash loan callbacks"
+        }
+      ]
+    },
+    {
+      "id": "poolManager",
+      "type": "external",
+      "label": "Uniswap V4",
+      "sublabel": "PoolManager",
+      "sources": [
+        {
+          "path": "src/adapters/UniswapV4Adapter.sol",
+          "line": 53,
+          "end_line": 89,
+          "label": "flashLoan / unlockCallback"
+        }
+      ]
+    },
+    {
+      "id": "aave",
+      "type": "external",
+      "label": "Aave V3 Pool",
+      "sublabel": "via AaveAdapter",
+      "sources": [
+        {
+          "path": "src/adapters/AaveAdapter.sol",
+          "line": 20,
+          "end_line": 52
+        }
+      ]
+    }
+  ],
+  "segments": [
+    {
+      "from": 160,
+      "to": 795,
+      "label": "Deposit"
+    },
+    {
+      "from": 825,
+      "to": 1440,
+      "label": "Withdraw"
+    }
+  ],
+  "messages": [
+    {
+      "id": "d-deposit",
+      "from": "user",
+      "to": "vault",
+      "y": 180,
+      "label": "deposit(assets, receiver)",
+      "variant": "emphasis",
+      "note": "whenNotEmergency · onlyWhitelisted(receiver). Charges the fee, pulls the WETH, mints shares and raises the HWM"
+    },
+    {
+      "id": "d-strategy",
+      "from": "vault",
+      "to": "strategy",
+      "y": 275,
+      "label": "deposit(assets, vault)",
+      "variant": "emphasis",
+      "note": "onlyVault · whenNotEmergency. The vault requires shares ≥ previewDeposit"
+    },
+    {
+      "id": "d-unlock",
+      "from": "strategy",
+      "to": "poolManager",
+      "y": 355,
+      "label": "unlock(assets × (L − 1))",
+      "note": "Below MIN_INVEST_ASSETS (1e12 wei) nothing is invested and the WETH stays idle"
+    },
+    {
+      "id": "d-callback",
+      "from": "poolManager",
+      "to": "strategy",
+      "y": 435,
+      "label": "unlockCallback(data)"
+    },
+    {
+      "id": "d-take",
+      "from": "strategy",
+      "to": "poolManager",
+      "y": 470,
+      "label": "take(flashAmount)"
+    },
+    {
+      "id": "d-supply",
+      "from": "strategy",
+      "to": "aave",
+      "y": 505,
+      "label": "supply(principal + flash)"
+    },
+    {
+      "id": "d-borrow",
+      "from": "strategy",
+      "to": "aave",
+      "y": 540,
+      "label": "borrow(flash, variable)"
+    },
+    {
+      "id": "d-repay-flash",
+      "from": "strategy",
+      "to": "poolManager",
+      "y": 575,
+      "label": "sync · transfer · settle",
+      "note": "Repays the flash loan; reverts if paid ≠ amount"
+    },
+    {
+      "id": "d-health",
+      "from": "strategy",
+      "to": "aave",
+      "y": 655,
+      "label": "getUserAccountData()",
+      "note": "HF < minHealthFactor ⇒ revert HealthFactorBelowMinimum"
+    },
+    {
+      "id": "d-shares-s",
+      "from": "strategy",
+      "to": "vault",
+      "y": 735,
+      "label": "strategy shares",
+      "variant": "return"
+    },
+    {
+      "id": "d-shares-v",
+      "from": "vault",
+      "to": "user",
+      "y": 770,
+      "label": "vault shares",
+      "variant": "return"
+    },
+    {
+      "id": "w-withdraw",
+      "from": "user",
+      "to": "vault",
+      "y": 845,
+      "label": "withdraw(assets, receiver, owner)",
+      "variant": "emphasis",
+      "note": "No whenNotEmergency: works in emergency mode. Charges the fee and uses the vault's idle WETH first"
+    },
+    {
+      "id": "w-strategy",
+      "from": "vault",
+      "to": "strategy",
+      "y": 940,
+      "label": "withdraw(shortfall, vault, vault)",
+      "variant": "emphasis",
+      "note": "Only when the vault balance does not cover assets"
+    },
+    {
+      "id": "w-unlock",
+      "from": "strategy",
+      "to": "poolManager",
+      "y": 1020,
+      "label": "unlock(debtToRepay)",
+      "note": "Pays from idle WETH first. debtToRepay = ceil(debt × N / equity); full close if equity left < 1e12 wei"
+    },
+    {
+      "id": "w-callback",
+      "from": "poolManager",
+      "to": "strategy",
+      "y": 1115,
+      "label": "unlockCallback(data)"
+    },
+    {
+      "id": "w-take",
+      "from": "strategy",
+      "to": "poolManager",
+      "y": 1150,
+      "label": "take(debtToRepay)"
+    },
+    {
+      "id": "w-repay",
+      "from": "strategy",
+      "to": "aave",
+      "y": 1185,
+      "label": "repay(debtToRepay)"
+    },
+    {
+      "id": "w-collateral",
+      "from": "strategy",
+      "to": "aave",
+      "y": 1220,
+      "label": "withdraw(debtToRepay + N)"
+    },
+    {
+      "id": "w-repay-flash",
+      "from": "strategy",
+      "to": "poolManager",
+      "y": 1255,
+      "label": "sync · transfer · settle"
+    },
+    {
+      "id": "w-weth-s",
+      "from": "strategy",
+      "to": "vault",
+      "y": 1290,
+      "label": "WETH (shortfall)",
+      "variant": "return",
+      "note": "Burns the vault's strategy shares"
+    },
+    {
+      "id": "w-weth-v",
+      "from": "vault",
+      "to": "user",
+      "y": 1370,
+      "label": "WETH (assets)",
+      "variant": "return",
+      "note": "Burns the owner's shares and lowers the HWM"
+    }
+  ],
+  "activations": [
+    {
+      "participant": "vault",
+      "from": 175,
+      "to": 775,
+      "type": "backend"
+    },
+    {
+      "participant": "strategy",
+      "from": 270,
+      "to": 740,
+      "type": "backend"
+    },
+    {
+      "participant": "poolManager",
+      "from": 350,
+      "to": 580,
+      "type": "external"
+    },
+    {
+      "participant": "vault",
+      "from": 840,
+      "to": 1375,
+      "type": "backend"
+    },
+    {
+      "participant": "strategy",
+      "from": 935,
+      "to": 1295,
+      "type": "backend"
+    },
+    {
+      "participant": "poolManager",
+      "from": 1015,
+      "to": 1260,
+      "type": "external"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "Deposit",
+      "items": [
+        "Each deposit invests only its own amount at targetLeverage; idle WETH is invested by reinvest()",
+        "Result: collateral = assets × L and debt = assets × (L − 1)",
+        "Everything runs inside the PoolManager callback; the outstanding flash loan is kept in transient storage"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Withdraw",
+      "items": [
+        "N is what remains after the strategy's idle WETH",
+        "Without debt, the strategy withdraws N from Aave directly, with no flash loan",
+        "Collateral ≤ debt reverts with InsufficientEquity; N > equity reverts with WithdrawExceedsEquity"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Scope",
+      "items": [
+        "Shows WETHLoopStrategy; AaveSimpleLendingStrategy only supplies to and withdraws from Aave",
+        "mint and redeem follow the same path as deposit and withdraw",
+        "Calls to Aave go through the AaveAdapter library, compiled into the strategy"
+      ]
+    }
+  ]
+}
