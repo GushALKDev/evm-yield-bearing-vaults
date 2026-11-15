@@ -7,6 +7,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Whitelist} from "../access/Whitelist.sol";
 import {BaseStrategy} from "./BaseStrategy.sol";
+import {IVault} from "../interfaces/IVault.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
@@ -21,7 +22,7 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
  *      - Emergency mode circuit breaker
  *      - Inflation attack protection via initial deposit
  */
-abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard {
+abstract contract BaseVault is ERC4626, Whitelist, ReentrancyGuard, IVault {
     using SafeERC20 for IERC20;
 
     /*//////////////////////////////////////////////////////////////

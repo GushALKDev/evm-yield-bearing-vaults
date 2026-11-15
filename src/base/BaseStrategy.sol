@@ -5,7 +5,7 @@ import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.so
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {BaseVault} from "./BaseVault.sol";
+import {IVault} from "../interfaces/IVault.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 /**
@@ -98,7 +98,7 @@ abstract contract BaseStrategy is ERC4626 {
     }
 
     function _onlyVaultAdmin() internal view {
-        if (msg.sender != BaseVault(VAULT).admin()) revert NotVaultAdmin();
+        if (msg.sender != IVault(VAULT).admin()) revert NotVaultAdmin();
     }
 
     /*//////////////////////////////////////////////////////////////

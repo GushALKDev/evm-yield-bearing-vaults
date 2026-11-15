@@ -2,7 +2,7 @@
 pragma solidity 0.8.26;
 
 import {BaseStrategy} from "../base/BaseStrategy.sol";
-import {BaseVault} from "../base/BaseVault.sol";
+import {IVault} from "../interfaces/IVault.sol";
 import {UniswapV4Adapter} from "../adapters/UniswapV4Adapter.sol";
 import {AaveAdapter} from "../adapters/AaveAdapter.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -353,7 +353,7 @@ contract WETHLoopStrategy is BaseStrategy, UniswapV4Adapter {
         }
 
         // Interactions: activation blocks deposits and closes the position
-        BaseVault(VAULT).activateEmergencyMode();
+        IVault(VAULT).activateEmergencyMode();
 
         return false;
     }
